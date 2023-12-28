@@ -2,6 +2,11 @@
 name = "nxtusb"
 version = "0.1.0"
 edition = "2021"
+authors = ["David Young <david@thedavidyoung.co.uk>"]
+license = "MPL-2.0"
+repository = "https://github.com/bricks-rs/nxtusb"
+readme = "README.md"
+description = "USB driver for communicating with the NXT brick"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

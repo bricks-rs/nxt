@@ -9,5 +9,7 @@ edition = "2021"
 examples = []
 
 [dependencies]
+num-derive = "0.4"
+num-traits = "0.2"
 rusb = "0.9"
 thiserror = "1"

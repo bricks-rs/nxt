@@ -3,7 +3,9 @@ use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 use std::io::{Cursor, Write};
 
-#[derive(Copy, Clone, Debug, FromPrimitive)]
+const FILENAME_LEN: usize = 20;
+
+#[derive(Copy, Clone, Debug, FromPrimitive, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Opcode {
     DirectStartProgram = 0x00,
@@ -178,7 +180,7 @@ impl DeviceError {
 #[repr(u8)]
 pub enum PacketType {
     Direct = 0x00,
-    Systemm = 0x01,
+    System = 0x01,
     Reply = 0x02,
     ReplyNotRequired = 0x80,
 }
@@ -191,14 +193,26 @@ impl TryFrom<u8> for PacketType {
 }
 
 #[derive(Debug)]
-pub struct Packet<'buf> {
+pub struct Packet {
     pub typ: PacketType,
     pub opcode: Opcode,
-    pub data: &'buf [u8],
+    pub data: Vec<u8>,
 }
 
-impl<'buf> Packet<'buf> {
-    pub fn parse(buf: &'buf [u8]) -> Result<Self> {
+impl Packet {
+    pub fn new(opcode: Opcode) -> Self {
+        Self {
+            typ: if opcode.is_system() {
+                PacketType::System
+            } else {
+                PacketType::Direct
+            },
+            opcode,
+            data: Vec::new(),
+        }
+    }
+
+    pub fn parse(buf: &[u8]) -> Result<Self> {
         let mut i = buf.iter().copied();
 
         let typ = i.next().wrap()?;
@@ -211,12 +225,12 @@ impl<'buf> Packet<'buf> {
         let status = DeviceError::try_from(status)?;
         status.error()?;
 
-        let data = &buf[3..];
+        let data = buf[3..].to_vec();
 
         Ok(Self { typ, opcode, data })
     }
 
-    pub fn serialise(&self, buf: &'buf mut [u8]) -> Result<&'buf [u8]> {
+    pub fn serialise<'buf>(&self, buf: &'buf mut [u8]) -> Result<&'buf [u8]> {
         let mut cur = Cursor::new(buf);
 
         cur.write_all(&[self.typ as u8, self.opcode as u8])?;
@@ -232,5 +246,58 @@ impl<'buf> Packet<'buf> {
         } else {
             Ok(u16::from_le_bytes([self.data[0], self.data[1]]))
         }
+    }
+
+    pub fn push_filename(&mut self, name: &str) -> Result<()> {
+        // plus one to allow for null terminator
+        if name.len() + 1 > FILENAME_LEN {
+            Err(Error::Serialise("Filename too long"))
+        } else if !name.is_ascii() {
+            Err(Error::Serialise("Filename must be ascii"))
+        } else {
+            self.data.extend(name.bytes());
+            self.data.extend(
+                std::iter::once(0).cycle().take(FILENAME_LEN - name.len()),
+            );
+            Ok(())
+        }
+    }
+
+    pub fn push_bool(&mut self, val: bool) {
+        self.data.push(val as u8);
+    }
+
+    pub fn push_u8(&mut self, val: u8) {
+        self.data.push(val);
+    }
+
+    pub fn push_i8(&mut self, val: i8) {
+        self.data.push(val.to_le_bytes()[0]);
+    }
+
+    pub fn push_u16(&mut self, val: u16) {
+        self.data.extend_from_slice(&val.to_le_bytes());
+    }
+
+    pub fn push_u32(&mut self, val: u32) {
+        self.data.extend_from_slice(&val.to_le_bytes());
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn push_filename_adds_20_bytes() {
+        let mut pkt = Packet::new(Opcode::DirectStartProgram);
+        assert!(pkt.data.is_empty());
+        pkt.push_filename("a_file").unwrap();
+        assert_eq!(pkt.data.len(), 20);
+        assert_eq!(pkt.data, b"a_file\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
+
+        // try some invalid names
+        pkt.push_filename("01234abcde01234abcde").unwrap_err();
+        pkt.push_filename("01234abcde01234abcde0").unwrap_err();
     }
 }

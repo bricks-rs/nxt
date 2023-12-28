@@ -16,11 +16,17 @@ pub enum Error {
     #[error("Parse error")]
     Parse(&'static str),
 
+    #[error("Serialisation error")]
+    Serialise(&'static str),
+
     #[error("IO error")]
     Io(#[from] std::io::Error),
 
     #[error("Failed to write packet")]
     Write,
+
+    #[error("Reply opcode mismatch")]
+    ReplyMismatch,
 }
 
 pub trait ErrWrap<T> {

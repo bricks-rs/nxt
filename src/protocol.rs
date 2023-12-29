@@ -197,6 +197,7 @@ pub struct Packet {
     pub typ: PacketType,
     pub opcode: Opcode,
     pub data: Vec<u8>,
+    data_offset: usize,
 }
 
 impl Packet {
@@ -209,6 +210,7 @@ impl Packet {
             },
             opcode,
             data: Vec::new(),
+            data_offset: 0,
         }
     }
 
@@ -227,7 +229,12 @@ impl Packet {
 
         let data = buf[3..].to_vec();
 
-        Ok(Self { typ, opcode, data })
+        Ok(Self {
+            typ,
+            opcode,
+            data,
+            data_offset: 0,
+        })
     }
 
     pub fn serialise<'buf>(&self, buf: &'buf mut [u8]) -> Result<&'buf [u8]> {
@@ -238,14 +245,6 @@ impl Packet {
         let len = cur.position() as usize;
         let buf = cur.into_inner();
         Ok(&buf[..len])
-    }
-
-    pub fn read_u16(&self) -> Result<u16> {
-        if self.data.len() < 2 {
-            Err(Error::Parse("Insufficient data"))
-        } else {
-            Ok(u16::from_le_bytes([self.data[0], self.data[1]]))
-        }
     }
 
     pub fn push_filename(&mut self, name: &str) -> Result<()> {
@@ -261,6 +260,17 @@ impl Packet {
             );
             Ok(())
         }
+    }
+
+    pub fn push_str(&mut self, s: &str, max_len: usize) -> Result<()> {
+        if s.as_bytes().len() + 1 > max_len {
+            return Err(Error::Serialise("String too long"));
+        }
+
+        self.data.extend_from_slice(s.as_bytes());
+        // enforce null terminator
+        self.data.push(0);
+        Ok(())
     }
 
     pub fn push_bool(&mut self, val: bool) {
@@ -281,6 +291,100 @@ impl Packet {
 
     pub fn push_u32(&mut self, val: u32) {
         self.data.extend_from_slice(&val.to_le_bytes());
+    }
+
+    pub fn push_slice(&mut self, data: &[u8]) {
+        self.data.extend_from_slice(data);
+    }
+
+    pub fn read_filename(&mut self) -> Result<String> {
+        // Read FILENAME_LEN bytes, remove null terminator, parse
+        if self.data_offset + FILENAME_LEN > self.data.len() {
+            return Err(Error::Parse("Requested slice too long"));
+        }
+
+        let fname =
+            &self.data[self.data_offset..self.data_offset + FILENAME_LEN];
+        self.data_offset += FILENAME_LEN;
+        let fname = fname
+            .iter()
+            .copied()
+            .take_while(|&ch| ch != 0)
+            .collect::<Vec<_>>();
+        Ok(String::from_utf8(fname)?)
+    }
+
+    pub fn read_string(&mut self, max_len: usize) -> Result<String> {
+        let ret = self
+            .data
+            .iter()
+            .copied()
+            .skip(self.data_offset)
+            .take_while(|&c| c != 0)
+            .take(max_len)
+            .collect::<Vec<_>>();
+        self.data_offset += ret.len();
+        Ok(String::from_utf8(ret)?)
+    }
+
+    pub fn read_bool(&mut self) -> Result<bool> {
+        let b0 = *self.data.get(self.data_offset).wrap()?;
+        self.data_offset += 1;
+        Ok(b0 != 0)
+    }
+
+    pub fn read_u8(&mut self) -> Result<u8> {
+        let b0 = *self.data.get(self.data_offset).wrap()?;
+        self.data_offset += 1;
+        Ok(b0)
+    }
+
+    pub fn read_i8(&mut self) -> Result<i8> {
+        let b0 = *self.data.get(self.data_offset).wrap()?;
+        self.data_offset += 1;
+        Ok(i8::from_le_bytes([b0]))
+    }
+
+    pub fn read_u16(&mut self) -> Result<u16> {
+        let b0 = *self.data.get(self.data_offset).wrap()?;
+        let b1 = *self.data.get(self.data_offset).wrap()?;
+        self.data_offset += 4;
+        Ok(u16::from_le_bytes([b0, b1]))
+    }
+
+    pub fn read_i16(&mut self) -> Result<i16> {
+        let b0 = *self.data.get(self.data_offset).wrap()?;
+        let b1 = *self.data.get(self.data_offset).wrap()?;
+        self.data_offset += 4;
+        Ok(i16::from_le_bytes([b0, b1]))
+    }
+
+    pub fn read_u32(&mut self) -> Result<u32> {
+        let b0 = *self.data.get(self.data_offset).wrap()?;
+        let b1 = *self.data.get(self.data_offset).wrap()?;
+        let b2 = *self.data.get(self.data_offset).wrap()?;
+        let b3 = *self.data.get(self.data_offset).wrap()?;
+        self.data_offset += 4;
+        Ok(u32::from_le_bytes([b0, b1, b2, b3]))
+    }
+
+    pub fn read_i32(&mut self) -> Result<i32> {
+        let b0 = *self.data.get(self.data_offset).wrap()?;
+        let b1 = *self.data.get(self.data_offset).wrap()?;
+        let b2 = *self.data.get(self.data_offset).wrap()?;
+        let b3 = *self.data.get(self.data_offset).wrap()?;
+        self.data_offset += 4;
+        Ok(i32::from_le_bytes([b0, b1, b2, b3]))
+    }
+
+    pub fn read_slice(&mut self, len: usize) -> Result<&[u8]> {
+        if self.data_offset + len > self.data.len() {
+            return Err(Error::Parse("Requested slice too long"));
+        }
+
+        let data = &self.data[self.data_offset..self.data_offset + len];
+        self.data_offset += len;
+        Ok(data)
     }
 }
 

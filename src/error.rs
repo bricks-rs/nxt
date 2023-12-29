@@ -27,6 +27,12 @@ pub enum Error {
 
     #[error("Reply opcode mismatch")]
     ReplyMismatch,
+
+    #[error("Invalid charactors for string")]
+    InvalidString(#[from] std::string::FromUtf8Error),
+
+    #[error("Integer out of range for type")]
+    IntOutOfRange(#[from] std::num::TryFromIntError),
 }
 
 pub trait ErrWrap<T> {

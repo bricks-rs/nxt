@@ -53,6 +53,18 @@ impl Nxt {
         Ok(Nxt { device })
     }
 
+    pub fn all() -> Result<Vec<Self>> {
+        rusb::devices()?
+            .iter()
+            .filter(device_filter)
+            .map(|device| {
+                Ok(Nxt {
+                    device: device.open()?,
+                })
+            })
+            .collect()
+    }
+
     fn send(&self, pkt: &Packet, check_status: bool) -> Result<()> {
         let mut buf = [0; 64];
         let serialised = pkt.serialise(&mut buf)?;

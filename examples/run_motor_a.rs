@@ -1,4 +1,4 @@
-use nxtusb::*;
+use nxtusb::{motor::*, *};
 
 const POWER: i8 = 80;
 

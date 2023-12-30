@@ -5,6 +5,7 @@ use std::io::{Cursor, Write};
 
 const FILENAME_LEN: usize = 20;
 
+// https://sourceforge.net/p/mindboards/code/HEAD/tree/lms_nbcnxc/trunk/AT91SAM7S256/Source/c_cmd.c#l676
 #[derive(Copy, Clone, Debug, FromPrimitive, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Opcode {
@@ -37,6 +38,7 @@ pub enum Opcode {
     DirectSetProperty = 0x1F,
     DirectGetProperty = 0x20,
     DirectUpdateResetCount = 0x21,
+    // gap
     SystemOpenread = 0x80,
     SystemOpenwrite = 0x81,
     SystemRead = 0x82,
@@ -65,6 +67,11 @@ pub enum Opcode {
     SystemPollcmd = 0xA2,
     SystemRenamefile = 0xA3,
     SystemBtfactoryreset = 0xA4,
+    // gap
+    SystemResizeDataFile = 0xd0,
+    SystemSeekFromStart = 0xd1,
+    SystemSeekFromCurrent = 0xd2,
+    SystemSeekFromEnd = 0xd3,
 }
 
 impl Opcode {

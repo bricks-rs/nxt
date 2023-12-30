@@ -5,10 +5,10 @@ use num_traits::FromPrimitive;
 #[derive(Debug, Copy, Clone, PartialEq, Eq, FromPrimitive)]
 #[repr(u8)]
 pub enum InPort {
-    Port1,
-    Port2,
-    Port3,
-    Port4,
+    S1 = 0,
+    S2 = 1,
+    S3 = 2,
+    S4 = 3,
 }
 
 impl TryFrom<u8> for InPort {
@@ -21,7 +21,25 @@ impl TryFrom<u8> for InPort {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, FromPrimitive)]
 #[repr(u8)]
 pub enum SensorType {
-    Touch,
+    None = 0,
+    Switch = 1,
+    Temperature = 2,
+    Reflection = 3,
+    Angle = 4,
+    LightActive = 5,
+    LightInactive = 6,
+    SoundDb = 7,
+    SoundDba = 8,
+    Custom = 9,
+    LowSpeed = 10,
+    LowSpeed9v = 11,
+    HighSpeed = 12,
+    ColourFull = 13,
+    ColourRed = 14,
+    ColourGreen = 15,
+    ColourBlue = 16,
+    ColourNone = 17,
+    ColourExit = 18,
 }
 
 impl TryFrom<u8> for SensorType {
@@ -34,7 +52,14 @@ impl TryFrom<u8> for SensorType {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, FromPrimitive)]
 #[repr(u8)]
 pub enum SensorMode {
-    Celsius,
+    Raw = 0x00,
+    Bool = 0x20,
+    Edge = 0x40,
+    Pulse = 0x60,
+    Percent = 0x80,
+    Celsius = 0xA0,
+    Farenheight = 0xC0,
+    Rotation = 0xE0,
 }
 
 impl TryFrom<u8> for SensorMode {

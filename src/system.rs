@@ -30,6 +30,7 @@ pub struct ModuleHandle {
 pub struct DeviceInfo {
     pub name: String,
     pub bt_addr: [u8; 6],
+    /// Link quality of the 4 possible connected devices
     pub signal_strength: (u8, u8, u8, u8),
     pub flash: u32,
 }

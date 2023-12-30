@@ -19,8 +19,10 @@ pub const NXT_VENDOR: u16 = 0x0694;
 pub const NXT_PRODUCT: u16 = 0x0002;
 
 const USB_TIMEOUT: Duration = Duration::from_millis(500);
-const WRITE_ENDPOINT: u8 = 1;
-const READ_ENDPOINT: u8 = 130;
+// https://sourceforge.net/p/mindboards/code/HEAD/tree/lms_nbcnxc/trunk/AT91SAM7S256/Source/d_usb.c
+const WRITE_ENDPOINT: u8 = 0x01;
+// https://sourceforge.net/p/mindboards/code/HEAD/tree/lms_nbcnxc/trunk/AT91SAM7S256/Source/d_usb.c
+const READ_ENDPOINT: u8 = 0x82;
 pub const RUN_FOREVER: u32 = 0;
 
 const MAX_MESSAGE_LEN: usize = 58;
@@ -215,8 +217,7 @@ impl Nxt {
     pub fn get_input_values(&self, port: InPort) -> Result<InputValues> {
         let mut pkt = Packet::new(Opcode::DirectGetInVals);
         pkt.push_u8(port as u8);
-        self.send(&pkt, false)?;
-        let mut recv = self.recv(Opcode::DirectGetInVals)?;
+        let mut recv = self.send_recv(&pkt)?;
         let port = recv.read_u8()?.try_into()?;
         let valid = recv.read_bool()?;
         let calibrated = recv.read_bool()?;
@@ -408,7 +409,7 @@ impl Nxt {
         Ok(FindFileHandle { handle, name, len })
     }
 
-    pub fn find_file_next(
+    pub fn file_find_next(
         &self,
         handle: &FindFileHandle,
     ) -> Result<FindFileHandle> {

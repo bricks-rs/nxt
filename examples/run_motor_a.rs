@@ -16,9 +16,6 @@ fn main() -> nxtusb::Result<()> {
         RUN_FOREVER,
     )?;
 
-    println!("beep");
-    nxt.play_tone(440, 1000)?;
-
     std::thread::sleep(std::time::Duration::from_secs(5));
 
     println!("Stop");

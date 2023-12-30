@@ -9,11 +9,6 @@ fn main() -> nxtusb::Result<()> {
 
     println!("Start polling");
 
-    // nxt.set_brick_name("a")?;
-    // nxt.boot(true)?;
-
-    // todo!();
-
     loop {
         let val = nxt.get_input_values(InPort::S1)?;
         println!("{val:?}");

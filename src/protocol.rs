@@ -20,7 +20,7 @@ pub enum Opcode {
     DirectResetInVal = 0x08,
     DirectMessageWrite = 0x09,
     DirectResetPosition = 0x0A,
-    DirectGetBattLvl = 0x0B,
+    DirectGetBattLevel = 0x0B,
     DirectStopSound = 0x0C,
     DirectKeepAlive = 0x0D,
     DirectLsGetStatus = 0x0E,
@@ -183,13 +183,14 @@ impl DeviceError {
     }
 }
 
-#[derive(Copy, Clone, Debug, FromPrimitive)]
+#[derive(Copy, Clone, Debug, FromPrimitive, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PacketType {
     Direct = 0x00,
     System = 0x01,
     Reply = 0x02,
-    ReplyNotRequired = 0x80,
+    DirectReplyNotRequired = 0x80,
+    SystemReplyNotRequired = 0x80 | 0x01,
 }
 
 impl TryFrom<u8> for PacketType {
@@ -207,6 +208,15 @@ pub struct Packet {
     data_offset: usize,
 }
 
+impl Eq for Packet {}
+impl PartialEq for Packet {
+    fn eq(&self, rhs: &Packet) -> bool {
+        self.typ == rhs.typ
+            && self.opcode == rhs.opcode
+            && self.data[self.data_offset..] == rhs.data[rhs.data_offset..]
+    }
+}
+
 impl Packet {
     pub fn new(opcode: Opcode) -> Self {
         Self {
@@ -222,32 +232,33 @@ impl Packet {
     }
 
     pub fn parse(buf: &[u8]) -> Result<Self> {
-        let mut i = buf.iter().copied();
-
-        let typ = i.next().wrap()?;
-        let typ = typ.try_into()?;
-
-        let opcode = i.next().wrap()?;
-        let opcode = opcode.try_into()?;
-
-        let status = i.next().wrap()?;
-        let status = DeviceError::try_from(status)?;
-        status.error()?;
-
-        let data = buf[3..].to_vec();
-
-        Ok(Self {
-            typ,
-            opcode,
-            data,
+        let mut pkt = Self {
+            typ: 0.try_into()?,
+            opcode: 0.try_into()?,
+            data: buf.to_vec(),
             data_offset: 0,
-        })
+        };
+
+        let typ = pkt.read_u8()?;
+        pkt.typ = typ.try_into()?;
+
+        let opcode = pkt.read_u8()?;
+        pkt.opcode = opcode.try_into()?;
+
+        Ok(pkt)
+    }
+
+    pub fn check_status(&mut self) -> Result<()> {
+        let status = self.read_u8()?;
+        let status = DeviceError::try_from(status)?;
+        status.error()
     }
 
     pub fn serialise<'buf>(&self, buf: &'buf mut [u8]) -> Result<&'buf [u8]> {
         let mut cur = Cursor::new(buf);
 
         cur.write_all(&[self.typ as u8, self.opcode as u8])?;
+        cur.write_all(&self.data)?;
 
         let len = cur.position() as usize;
         let buf = cur.into_inner();
@@ -276,7 +287,11 @@ impl Packet {
 
         self.data.extend_from_slice(s.as_bytes());
         // enforce null terminator
-        self.data.push(0);
+        self.data.extend(
+            std::iter::once(0)
+                .cycle()
+                .take(max_len - s.as_bytes().len()),
+        );
         Ok(())
     }
 
@@ -399,6 +414,11 @@ impl Packet {
 mod test {
     use super::*;
 
+    // gen_test_vectors.py
+    const BATT_LEVEL: &[u8] = &[0, 11];
+    const BRICK_NAME: &[u8] =
+        &[1, 152, 116, 101, 115, 116, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
     #[test]
     fn push_filename_adds_20_bytes() {
         let mut pkt = Packet::new(Opcode::DirectStartProgram);
@@ -410,5 +430,27 @@ mod test {
         // try some invalid names
         pkt.push_filename("01234abcde01234abcde").unwrap_err();
         pkt.push_filename("01234abcde01234abcde0").unwrap_err();
+    }
+
+    #[test]
+    fn batt_level() {
+        let pkt = Packet::new(Opcode::DirectGetBattLevel);
+        let mut buf = [0; 64];
+        let ser = pkt.serialise(&mut buf).unwrap();
+        assert_eq!(ser, BATT_LEVEL);
+        let de = Packet::parse(BATT_LEVEL).unwrap();
+        assert_eq!(de, pkt);
+    }
+
+    #[test]
+    fn brick_name() {
+        let mut pkt = Packet::new(Opcode::SystemSetbrickname);
+        pkt.push_str("test", 15).unwrap();
+        dbg!(&pkt);
+        let mut buf = [0; 64];
+        let ser = pkt.serialise(&mut buf).unwrap();
+        assert_eq!(ser, BRICK_NAME);
+        let de = Packet::parse(BRICK_NAME).unwrap();
+        assert_eq!(de, pkt);
     }
 }

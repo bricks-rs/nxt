@@ -92,7 +92,8 @@ impl Nxt {
 
         let buf = &buf[..read];
         println!("{buf:x?}");
-        let recv = Packet::parse(buf)?;
+        let mut recv = Packet::parse(buf)?;
+        recv.check_status()?;
         if recv.opcode != opcode {
             Err(Error::ReplyMismatch)
         } else {
@@ -106,9 +107,8 @@ impl Nxt {
     }
 
     pub fn get_battery_level(&self) -> Result<u16> {
-        let pkt = Packet::new(Opcode::DirectGetBattLvl);
-        self.send(&pkt, false)?;
-        let mut recv = self.recv(Opcode::DirectGetBattLvl)?;
+        let pkt = Packet::new(Opcode::DirectGetBattLevel);
+        let mut recv = self.send_recv(&pkt)?;
         recv.read_u16()
     }
 

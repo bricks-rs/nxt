@@ -218,6 +218,8 @@ impl Nxt {
         let mut pkt = Packet::new(Opcode::DirectGetInVals);
         pkt.push_u8(port as u8);
         let mut recv = self.send_recv(&pkt)?;
+        // hdr>>  s  p  v  c  ty mo  raw>>  norm>  sc>>  cal>>
+        // [2, 7, 0, 0, 1, 0, 1, 20, ff, 3, ff, 3, 0, 0, ff, 3]
         let port = recv.read_u8()?.try_into()?;
         let valid = recv.read_bool()?;
         let calibrated = recv.read_bool()?;

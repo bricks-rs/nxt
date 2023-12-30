@@ -368,34 +368,30 @@ impl Packet {
     }
 
     pub fn read_u16(&mut self) -> Result<u16> {
-        let b0 = *self.data.get(self.data_offset).wrap()?;
-        let b1 = *self.data.get(self.data_offset).wrap()?;
-        self.data_offset += 4;
+        let b0 = self.read_u8()?;
+        let b1 = self.read_u8()?;
         Ok(u16::from_le_bytes([b0, b1]))
     }
 
     pub fn read_i16(&mut self) -> Result<i16> {
-        let b0 = *self.data.get(self.data_offset).wrap()?;
-        let b1 = *self.data.get(self.data_offset).wrap()?;
-        self.data_offset += 4;
+        let b0 = self.read_u8()?;
+        let b1 = self.read_u8()?;
         Ok(i16::from_le_bytes([b0, b1]))
     }
 
     pub fn read_u32(&mut self) -> Result<u32> {
-        let b0 = *self.data.get(self.data_offset).wrap()?;
-        let b1 = *self.data.get(self.data_offset).wrap()?;
-        let b2 = *self.data.get(self.data_offset).wrap()?;
-        let b3 = *self.data.get(self.data_offset).wrap()?;
-        self.data_offset += 4;
+        let b0 = self.read_u8()?;
+        let b1 = self.read_u8()?;
+        let b2 = self.read_u8()?;
+        let b3 = self.read_u8()?;
         Ok(u32::from_le_bytes([b0, b1, b2, b3]))
     }
 
     pub fn read_i32(&mut self) -> Result<i32> {
-        let b0 = *self.data.get(self.data_offset).wrap()?;
-        let b1 = *self.data.get(self.data_offset).wrap()?;
-        let b2 = *self.data.get(self.data_offset).wrap()?;
-        let b3 = *self.data.get(self.data_offset).wrap()?;
-        self.data_offset += 4;
+        let b0 = self.read_u8()?;
+        let b1 = self.read_u8()?;
+        let b2 = self.read_u8()?;
+        let b3 = self.read_u8()?;
         Ok(i32::from_le_bytes([b0, b1, b2, b3]))
     }
 

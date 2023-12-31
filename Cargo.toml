@@ -15,13 +15,17 @@ name = "gui"
 required-features = ["examples"]
 
 [features]
-examples = ["eframe"]
+examples = ["dep:eframe", "strum"]
+strum = ["dep:strum", "dep:strum_macros"]
 
 [dependencies]
 num-derive = "0.4"
 num-traits = "0.2"
 rusb = "0.9"
 thiserror = "1"
+
+strum = { version = "0.25", optional = true }
+strum_macros = { version = "0.25", optional = true }
 
 # required for gui
 eframe = { version = "0.24", optional = true }

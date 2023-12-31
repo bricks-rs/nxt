@@ -2,7 +2,10 @@
 
 pub use error::{Error, Result};
 use rusb::{Device, DeviceHandle, GlobalContext, UsbContext};
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
+
+#[cfg(feature = "strum")]
+pub use strum::IntoEnumIterator;
 
 mod error;
 pub mod motor;
@@ -31,9 +34,9 @@ const MAX_MESSAGE_LEN: usize = 58;
 const MAX_NAME_LEN: usize = 15;
 const MAX_INBOX_ID: u8 = 19;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Nxt {
-    device: DeviceHandle<GlobalContext>,
+    device: Arc<DeviceHandle<GlobalContext>>,
     name: String,
 }
 
@@ -67,7 +70,10 @@ impl Nxt {
         device.claim_interface(USB_INTERFACE)?;
         let name = "".into();
 
-        Ok(Nxt { device, name })
+        Ok(Nxt {
+            device: device.into(),
+            name,
+        })
     }
 
     pub fn name(&self) -> &str {
@@ -98,7 +104,6 @@ impl Nxt {
                 .read_bulk(READ_ENDPOINT, &mut buf, USB_TIMEOUT)?;
 
         let buf = &buf[..read];
-        println!("{buf:x?}");
         let mut recv = Packet::parse(buf)?;
         recv.check_status()?;
         if recv.opcode != opcode {

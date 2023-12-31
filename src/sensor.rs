@@ -1,8 +1,10 @@
 use crate::{Error, Result};
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
+use std::fmt::{self, Display, Formatter};
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, FromPrimitive)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, FromPrimitive)]
+#[cfg_attr(feature = "strum", derive(strum_macros::EnumIter))]
 #[repr(u8)]
 pub enum InPort {
     S1 = 0,
@@ -18,9 +20,11 @@ impl TryFrom<u8> for InPort {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, FromPrimitive)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, FromPrimitive)]
+#[cfg_attr(feature = "strum", derive(strum_macros::EnumIter))]
 #[repr(u8)]
 pub enum SensorType {
+    #[default]
     None = 0,
     Switch = 1,
     Temperature = 2,
@@ -49,9 +53,11 @@ impl TryFrom<u8> for SensorType {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, FromPrimitive)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, FromPrimitive)]
+#[cfg_attr(feature = "strum", derive(strum_macros::EnumIter))]
 #[repr(u8)]
 pub enum SensorMode {
+    #[default]
     Raw = 0x00,
     Bool = 0x20,
     Edge = 0x40,
@@ -69,7 +75,7 @@ impl TryFrom<u8> for SensorMode {
     }
 }
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct InputValues {
     pub port: InPort,
     pub valid: bool,
@@ -80,4 +86,36 @@ pub struct InputValues {
     pub normalised_value: u16,
     pub scaled_value: i16,
     pub calibrated_value: i16,
+}
+
+impl Display for InputValues {
+    fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
+        if self.valid {
+            match self.sensor_mode {
+                SensorMode::Raw => {
+                    write!(fmt, "{}", self.raw_value)
+                }
+                SensorMode::Bool => {
+                    write!(fmt, "{}", self.scaled_value != 0)
+                }
+                SensorMode::Edge | SensorMode::Pulse => {
+                    write!(fmt, "{}", self.scaled_value)
+                }
+                SensorMode::Percent => {
+                    write!(fmt, "{}%", self.scaled_value)
+                }
+                SensorMode::Celsius => {
+                    write!(fmt, "{}°C", self.scaled_value)
+                }
+                SensorMode::Farenheight => {
+                    write!(fmt, "{}°F", self.scaled_value)
+                }
+                SensorMode::Rotation => {
+                    write!(fmt, "{} ticks", self.scaled_value)
+                }
+            }
+        } else {
+            write!(fmt, "...")
+        }
+    }
 }

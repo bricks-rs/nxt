@@ -1,5 +1,8 @@
 use eframe::egui;
-use nxtusb::{motor::*, *};
+use nxtusb::{motor::*, sensor::*, *};
+use std::{sync::mpsc, time::Duration};
+
+const POLL_DELAY: Duration = Duration::from_millis(300);
 
 fn main() {
     let opts = eframe::NativeOptions::default();
@@ -7,11 +10,12 @@ fn main() {
         .unwrap();
 }
 
-#[derive(Default)]
 struct App {
     nxt_available: Vec<Nxt>,
     nxt_selected: Option<usize>,
     motors: Vec<Motor>,
+    sensors: Vec<InputValues>,
+    sensor_poll_handle: SensorPollHandle,
 }
 
 struct Motor {
@@ -20,13 +24,25 @@ struct Motor {
 }
 
 impl App {
-    fn new(_cc: &eframe::CreationContext) -> Self {
+    fn new(cc: &eframe::CreationContext) -> Self {
+        let spacing = egui::style::Spacing {
+            slider_width: 200.0,
+            ..Default::default()
+        };
+        cc.egui_ctx.set_style(egui::style::Style {
+            spacing,
+            ..Default::default()
+        });
+
         Self {
+            nxt_available: Vec::new(),
+            nxt_selected: None,
             motors: [OutPort::A, OutPort::B, OutPort::C]
                 .iter()
                 .map(|&port| Motor { port, power: 0 })
                 .collect(),
-            ..Self::default()
+            sensors: Vec::new(),
+            sensor_poll_handle: SensorPollHandle::new(cc.egui_ctx.clone()),
         }
     }
 }
@@ -34,11 +50,16 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
+            if let Some(values) = self.sensor_poll_handle.recv() {
+                self.sensors = values;
+            }
+
             ui.heading("NXT GUI");
 
             ui.horizontal(|ui| {
+                let old = self.nxt_selected;
                 ui.label("Selected brick:");
-                egui::ComboBox::from_label("")
+                egui::ComboBox::from_id_source("nxt")
                     .selected_text(format!("{:?}", self.nxt_selected))
                     .show_ui(ui, |ui| {
                         ui.selectable_value(
@@ -55,6 +76,7 @@ impl eframe::App for App {
                             );
                         }
                     });
+
                 if ui.button("Refresh").clicked() {
                     self.nxt_selected = None;
                     self.nxt_available.clear();
@@ -66,14 +88,23 @@ impl eframe::App for App {
                         self.nxt_selected = Some(0);
                     }
                 }
+
+                if self.nxt_selected != old {
+                    let nxt = self
+                        .nxt_selected
+                        .and_then(|idx| self.nxt_available.get(idx));
+                    self.sensor_poll_handle.send(nxt.cloned());
+                }
             });
 
-            ui.separator();
             if let Some(nxt) = self
                 .nxt_selected
                 .and_then(|idx| self.nxt_available.get(idx))
             {
+                ui.separator();
                 motor_ui(ui, nxt, &mut self.motors);
+                ui.separator();
+                sensor_ui(ui, nxt, &mut self.sensors);
             }
         });
     }
@@ -87,6 +118,7 @@ fn motor_ui(ui: &mut egui::Ui, nxt: &Nxt, motors: &mut Vec<Motor>) {
             ui.add(
                 egui::Slider::new(&mut mot.power, -100..=100)
                     .text("Power")
+                    .suffix("%")
                     .clamp_to_range(true),
             );
             if ui.button("Stop").clicked() {
@@ -107,5 +139,105 @@ fn motor_ui(ui: &mut egui::Ui, nxt: &Nxt, motors: &mut Vec<Motor>) {
                 .unwrap();
             }
         });
+    }
+}
+
+fn sensor_ui(ui: &mut egui::Ui, nxt: &Nxt, sensors: &mut Vec<InputValues>) {
+    for sens in sensors {
+        ui.horizontal(|ui| {
+            let old_typ = sens.sensor_type;
+            let old_mode = sens.sensor_mode;
+
+            ui.label(format!("{:?}", sens.port));
+
+            ui.label("Type:");
+            egui::ComboBox::from_id_source((sens.port, "sensor_type"))
+                .selected_text(format!("{:?}", sens.sensor_type))
+                .show_ui(ui, |ui| {
+                    for opt in SensorType::iter() {
+                        ui.selectable_value(
+                            &mut sens.sensor_type,
+                            opt,
+                            format!("{opt:?}"),
+                        );
+                    }
+                });
+
+            ui.label("Mode:");
+            egui::ComboBox::from_id_source((sens.port, "sensor_mode"))
+                .selected_text(format!("{:?}", sens.sensor_mode))
+                .show_ui(ui, |ui| {
+                    for opt in SensorMode::iter() {
+                        ui.selectable_value(
+                            &mut sens.sensor_mode,
+                            opt,
+                            format!("{opt:?}"),
+                        );
+                    }
+                });
+
+            ui.label(format!("Value: {sens}"));
+
+            if sens.sensor_type != old_typ || sens.sensor_mode != old_mode {
+                nxt.set_input_mode(
+                    sens.port,
+                    sens.sensor_type,
+                    sens.sensor_mode,
+                )
+                .unwrap();
+            }
+        });
+    }
+}
+
+struct SensorPollHandle {
+    val_rx: mpsc::Receiver<Vec<InputValues>>,
+    nxt_tx: mpsc::Sender<Option<Nxt>>,
+}
+
+impl SensorPollHandle {
+    pub fn new(ctx: egui::Context) -> Self {
+        let (val_tx, val_rx) = mpsc::channel();
+        let (nxt_tx, nxt_rx) = mpsc::channel();
+
+        std::thread::spawn(move || Self::thread_loop(ctx, val_tx, nxt_rx));
+
+        Self { val_rx, nxt_tx }
+    }
+
+    pub fn recv(&mut self) -> Option<Vec<InputValues>> {
+        self.val_rx.try_recv().ok()
+    }
+
+    pub fn send(&self, nxt: Option<Nxt>) {
+        self.nxt_tx.send(nxt).unwrap();
+    }
+
+    fn thread_loop(
+        ctx: egui::Context,
+        val_tx: mpsc::Sender<Vec<InputValues>>,
+        nxt_rx: mpsc::Receiver<Option<Nxt>>,
+    ) {
+        let mut nxt = None;
+        let mut old_values = Vec::new();
+        loop {
+            if let Ok(new) = nxt_rx.try_recv() {
+                nxt = new;
+                println!("Change nxt to {nxt:?}");
+            }
+
+            if let Some(nxt) = &nxt {
+                let mut values = Vec::with_capacity(4);
+                for port in InPort::iter() {
+                    values.push(nxt.get_input_values(port).unwrap());
+                }
+                if values != old_values {
+                    old_values = values.clone();
+                    val_tx.send(values).unwrap();
+                    ctx.request_repaint();
+                }
+            }
+            std::thread::sleep(POLL_DELAY);
+        }
     }
 }

@@ -5,7 +5,7 @@ use std::ops::BitOr;
 
 // supported ports are 0, 1, 2 == A, B, C
 // 3 == AB, 4 == AC, 5 == BC, 6 == ABC
-#[derive(Copy, Clone, Debug, PartialEq, Eq, FromPrimitive)]
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, FromPrimitive)]
 #[repr(u8)]
 pub enum OutPort {
     A = 0,

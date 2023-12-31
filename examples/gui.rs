@@ -3,6 +3,7 @@ use nxtusb::{motor::*, sensor::*, system::*, *};
 use std::{sync::mpsc, time::Duration};
 
 const POLL_DELAY: Duration = Duration::from_millis(300);
+const DISPLAY_PX_SCALE: usize = 4;
 
 fn main() {
     let opts = eframe::NativeOptions::default();
@@ -115,6 +116,10 @@ impl eframe::App for App {
                 motor_ui(ui, nxt, &mut self.motors);
                 ui.separator();
                 sensor_ui(ui, nxt, &mut self.sensors);
+                if let Some(display) = &self.display {
+                    ui.separator();
+                    display_ui(ui, display);
+                }
             }
         });
     }
@@ -200,6 +205,31 @@ fn sensor_ui(ui: &mut egui::Ui, nxt: &Nxt, sensors: &mut Vec<InputValues>) {
     }
 }
 
+fn display_ui(ui: &mut egui::Ui, display: &DisplayRaster) {
+    egui::Frame::canvas(ui.style()).show(ui, |ui| {
+        let position = ui.available_rect_before_wrap().min.to_vec2();
+
+        for row in 0..DISPLAY_HEIGHT {
+            for col in 0..DISPLAY_WIDTH {
+                let x1 = row * DISPLAY_PX_SCALE;
+                let y1 = col * DISPLAY_PX_SCALE;
+                let x2 = x1 + DISPLAY_PX_SCALE;
+                let y2 = y1 + DISPLAY_PX_SCALE;
+                let fill = if display[row][col] == 0 { 0xff } else { 0x00 };
+                ui.painter().rect_filled(
+                    egui::Rect::from_two_pos(
+                        egui::pos2(y1 as f32, x1 as f32),
+                        egui::pos2(y2 as f32, x2 as f32),
+                    )
+                    .translate(position),
+                    egui::Rounding::ZERO,
+                    egui::Color32::from_rgb(fill, fill, fill),
+                );
+            }
+        }
+    });
+}
+
 struct SensorPollHandle {
     val_rx: mpsc::Receiver<Message>,
     nxt_tx: mpsc::Sender<Option<Nxt>>,
@@ -254,6 +284,7 @@ impl SensorPollHandle {
                         .send(Message::Display(display_data_to_raster(&screen)))
                         .unwrap();
                     old_screen = screen;
+                    ctx.request_repaint();
                 }
             }
             std::thread::sleep(POLL_DELAY);

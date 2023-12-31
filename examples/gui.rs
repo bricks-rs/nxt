@@ -1,5 +1,5 @@
 use eframe::egui;
-use nxtusb::{motor::*, sensor::*, *};
+use nxtusb::{motor::*, sensor::*, system::*, *};
 use std::{sync::mpsc, time::Duration};
 
 const POLL_DELAY: Duration = Duration::from_millis(300);
@@ -16,11 +16,17 @@ struct App {
     motors: Vec<Motor>,
     sensors: Vec<InputValues>,
     sensor_poll_handle: SensorPollHandle,
+    display: Option<DisplayRaster>,
 }
 
 struct Motor {
     port: OutPort,
     power: i8,
+}
+
+enum Message {
+    Sensors(Vec<InputValues>),
+    Display(DisplayRaster),
 }
 
 impl App {
@@ -43,6 +49,7 @@ impl App {
                 .collect(),
             sensors: Vec::new(),
             sensor_poll_handle: SensorPollHandle::new(cc.egui_ctx.clone()),
+            display: None,
         }
     }
 }
@@ -50,8 +57,11 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            if let Some(values) = self.sensor_poll_handle.recv() {
-                self.sensors = values;
+            if let Some(message) = self.sensor_poll_handle.recv() {
+                match message {
+                    Message::Sensors(values) => self.sensors = values,
+                    Message::Display(raster) => self.display = Some(raster),
+                }
             }
 
             ui.heading("NXT GUI");
@@ -191,7 +201,7 @@ fn sensor_ui(ui: &mut egui::Ui, nxt: &Nxt, sensors: &mut Vec<InputValues>) {
 }
 
 struct SensorPollHandle {
-    val_rx: mpsc::Receiver<Vec<InputValues>>,
+    val_rx: mpsc::Receiver<Message>,
     nxt_tx: mpsc::Sender<Option<Nxt>>,
 }
 
@@ -205,7 +215,7 @@ impl SensorPollHandle {
         Self { val_rx, nxt_tx }
     }
 
-    pub fn recv(&mut self) -> Option<Vec<InputValues>> {
+    pub fn recv(&mut self) -> Option<Message> {
         self.val_rx.try_recv().ok()
     }
 
@@ -215,11 +225,12 @@ impl SensorPollHandle {
 
     fn thread_loop(
         ctx: egui::Context,
-        val_tx: mpsc::Sender<Vec<InputValues>>,
+        val_tx: mpsc::Sender<Message>,
         nxt_rx: mpsc::Receiver<Option<Nxt>>,
     ) {
         let mut nxt = None;
         let mut old_values = Vec::new();
+        let mut old_screen = [0u8; DISPLAY_DATA_LEN];
         loop {
             if let Ok(new) = nxt_rx.try_recv() {
                 nxt = new;
@@ -233,8 +244,16 @@ impl SensorPollHandle {
                 }
                 if values != old_values {
                     old_values = values.clone();
-                    val_tx.send(values).unwrap();
+                    val_tx.send(Message::Sensors(values)).unwrap();
                     ctx.request_repaint();
+                }
+
+                let screen = nxt.get_display_data().unwrap();
+                if screen != old_screen {
+                    val_tx
+                        .send(Message::Display(display_data_to_raster(&screen)))
+                        .unwrap();
+                    old_screen = screen;
                 }
             }
             std::thread::sleep(POLL_DELAY);

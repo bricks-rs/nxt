@@ -2,7 +2,11 @@
 
 pub use error::{Error, Result};
 use rusb::{Device, DeviceHandle, GlobalContext, UsbContext};
-use std::{sync::Arc, time::Duration};
+use std::{
+    io::{Cursor, Write},
+    sync::Arc,
+    time::Duration,
+};
 
 #[cfg(feature = "strum")]
 pub use strum::IntoEnumIterator;
@@ -33,6 +37,15 @@ pub const RUN_FOREVER: u32 = 0;
 const MAX_MESSAGE_LEN: usize = 58;
 const MAX_NAME_LEN: usize = 15;
 const MAX_INBOX_ID: u8 = 19;
+
+const MOD_DISPLAY: u32 = 0xa0001;
+const DISPLAY_DATA_OFFSET: u16 = 119;
+pub const DISPLAY_WIDTH: usize = 100;
+pub const DISPLAY_HEIGHT: usize = 64;
+pub const DISPLAY_DATA_LEN: usize = DISPLAY_WIDTH * DISPLAY_HEIGHT / 8;
+const DISPLAY_DATA_CHUNK_SIZE: u16 = 32;
+const DISPLAY_NUM_CHUNKS: usize =
+    DISPLAY_DATA_LEN / DISPLAY_DATA_CHUNK_SIZE as usize;
 
 #[derive(Clone, Debug)]
 pub struct Nxt {
@@ -116,6 +129,23 @@ impl Nxt {
     fn send_recv(&self, pkt: &Packet) -> Result<Packet> {
         self.send(pkt, false)?;
         self.recv(pkt.opcode)
+    }
+
+    pub fn get_display_data(&self) -> Result<[u8; DISPLAY_DATA_LEN]> {
+        let out = [0; DISPLAY_DATA_LEN];
+        let mut cur = Cursor::new(out);
+        for chunk_idx in 0..DISPLAY_NUM_CHUNKS {
+            let data = self.read_io_map(
+                MOD_DISPLAY,
+                DISPLAY_DATA_OFFSET
+                    + chunk_idx as u16 * DISPLAY_DATA_CHUNK_SIZE,
+                DISPLAY_DATA_CHUNK_SIZE,
+            )?;
+            assert_eq!(data.len(), DISPLAY_DATA_CHUNK_SIZE.into());
+            cur.write_all(&data)?;
+        }
+
+        Ok(cur.into_inner())
     }
 
     pub fn get_battery_level(&self) -> Result<u16> {

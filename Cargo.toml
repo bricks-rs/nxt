@@ -10,11 +10,18 @@ description = "USB driver for communicating with the NXT brick"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[[example]]
+name = "gui"
+required-features = ["examples"]
+
 [features]
-examples = []
+examples = ["eframe"]
 
 [dependencies]
 num-derive = "0.4"
 num-traits = "0.2"
 rusb = "0.9"
 thiserror = "1"
+
+# required for gui
+eframe = { version = "0.24", optional = true }

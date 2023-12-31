@@ -23,6 +23,8 @@ const USB_TIMEOUT: Duration = Duration::from_millis(500);
 const WRITE_ENDPOINT: u8 = 0x01;
 // https://sourceforge.net/p/mindboards/code/HEAD/tree/lms_nbcnxc/trunk/AT91SAM7S256/Source/d_usb.c
 const READ_ENDPOINT: u8 = 0x82;
+const USB_INTERFACE: u8 = 0;
+
 pub const RUN_FOREVER: u32 = 0;
 
 const MAX_MESSAGE_LEN: usize = 58;
@@ -32,6 +34,7 @@ const MAX_INBOX_ID: u8 = 19;
 #[derive(Debug)]
 pub struct Nxt {
     device: DeviceHandle<GlobalContext>,
+    name: String,
 }
 
 fn device_filter<Usb: UsbContext>(dev: &Device<Usb>) -> bool {
@@ -48,23 +51,27 @@ impl Nxt {
             .iter()
             .find(device_filter)
             .ok_or(Error::NoBrick)?;
-        let mut device = device.open()?;
-        device.reset()?;
-        device.claim_interface(0)?;
-
-        Ok(Nxt { device })
+        Self::open(device)
     }
 
     pub fn all() -> Result<Vec<Self>> {
         rusb::devices()?
             .iter()
             .filter(device_filter)
-            .map(|device| {
-                Ok(Nxt {
-                    device: device.open()?,
-                })
-            })
+            .map(Nxt::open)
             .collect()
+    }
+
+    fn open(device: Device<GlobalContext>) -> Result<Self> {
+        let mut device = device.open()?;
+        device.claim_interface(USB_INTERFACE)?;
+        let name = "".into();
+
+        Ok(Nxt { device, name })
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     fn send(&self, pkt: &Packet, check_status: bool) -> Result<()> {

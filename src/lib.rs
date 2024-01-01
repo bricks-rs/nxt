@@ -39,18 +39,29 @@ pub const NXT_VENDOR: u16 = 0x0694;
 /// USB product ID used for NXT
 pub const NXT_PRODUCT: u16 = 0x0002;
 
+/// Timeout on the USB connection
 const USB_TIMEOUT: Duration = Duration::from_millis(500);
-// https://sourceforge.net/p/mindboards/code/HEAD/tree/lms_nbcnxc/trunk/AT91SAM7S256/Source/d_usb.c
+/// USB endpoint address for sending write requests to
+/// <https://sourceforge.net/p/mindboards/code/HEAD/tree/lms_nbcnxc/trunk/AT91SAM7S256/Source/d_usb.c>
 const WRITE_ENDPOINT: u8 = 0x01;
-// https://sourceforge.net/p/mindboards/code/HEAD/tree/lms_nbcnxc/trunk/AT91SAM7S256/Source/d_usb.c
+/// USB endpoint address for sending read requests to
+/// <https://sourceforge.net/p/mindboards/code/HEAD/tree/lms_nbcnxc/trunk/AT91SAM7S256/Source/d_usb.c>
 const READ_ENDPOINT: u8 = 0x82;
+/// USB interface ID used by the NXT brick
 const USB_INTERFACE: u8 = 0;
 
+/// Maximum length of a USB message
 const MAX_MESSAGE_LEN: usize = 58;
+/// Length of the brick name field
 const MAX_NAME_LEN: usize = 15;
+/// Largest inbox ID for inter-brick messaging
 const MAX_INBOX_ID: u8 = 19;
 
+/// Module ID of the display (tested on the NBC enhanced firmware, may
+/// differ for the official LEGO firmware)
 const MOD_DISPLAY: u32 = 0xa0001;
+/// Offset of the display data into the display iomap struct; consult
+/// the firmware source for details
 const DISPLAY_DATA_OFFSET: u16 = 119;
 /// Width of NXT LCD screen in pixels
 pub const DISPLAY_WIDTH: usize = 100;
@@ -75,6 +86,8 @@ pub struct Nxt {
     name: String,
 }
 
+/// Filter method to check the vendor and product ID on a USB device,
+/// returning `true` if they match an NXT brick
 fn device_filter<Usb: UsbContext>(dev: &Device<Usb>) -> bool {
     if let Ok(desc) = dev.device_descriptor() {
         desc.vendor_id() == NXT_VENDOR && desc.product_id() == NXT_PRODUCT
@@ -103,15 +116,18 @@ impl Nxt {
             .collect()
     }
 
+    /// Connect to the provided USB device and claim the [USB_INTERFACE]
+    /// interface on it
     fn open(device: Device<GlobalContext>) -> Result<Self> {
         let mut device = device.open()?;
         device.claim_interface(USB_INTERFACE)?;
-        let name = "".into();
-
-        Ok(Nxt {
+        let mut nxt = Nxt {
             device: device.into(),
-            name,
-        })
+            name: String::new(),
+        };
+        let info = nxt.get_device_info()?;
+        nxt.name = info.name;
+        Ok(nxt)
     }
 
     /// Return the name of the NXT brick
@@ -119,6 +135,9 @@ impl Nxt {
         &self.name
     }
 
+    /// Send the provided packet an optionally check the response status.
+    /// Use this API if there's no useful data in the reply beyond the
+    /// status field
     fn send(&self, pkt: &Packet, check_status: bool) -> Result<()> {
         let mut buf = [0; 64];
         let serialised = pkt.serialise(&mut buf)?;
@@ -136,6 +155,8 @@ impl Nxt {
         }
     }
 
+    /// Read an incoming reply packet and verify that its opcode matches
+    /// the expected value
     fn recv(&self, opcode: Opcode) -> Result<Packet> {
         let mut buf = [0; 64];
         let read =
@@ -152,6 +173,9 @@ impl Nxt {
         }
     }
 
+    /// Send the provided packet and read the response. Use this API
+    /// when the reply is expected to contain useful data, e.g. sensor
+    /// values
     fn send_recv(&self, pkt: &Packet) -> Result<Packet> {
         self.send(pkt, false)?;
         self.recv(pkt.opcode)

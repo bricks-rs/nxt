@@ -1,3 +1,5 @@
+#![allow(missing_docs, clippy::missing_docs_in_private_items)]
+
 use std::fmt::Debug;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -35,7 +37,9 @@ pub enum Error {
     IntOutOfRange(#[from] std::num::TryFromIntError),
 }
 
+/// Trait for converting an `Option<T>` into a `Result<T>`
 pub trait ErrWrap<T> {
+    /// Convert `self` into a `Result`
     fn wrap(self) -> Result<T>;
 }
 

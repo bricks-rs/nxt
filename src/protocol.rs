@@ -1,11 +1,15 @@
+//! Message protocol for packets sent over USB or Bluetooth
+
 use crate::{error::ErrWrap, Error, Result};
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 use std::io::{Cursor, Write};
 
+/// Length of the filename field, including null terminator
 const FILENAME_LEN: usize = 20;
 
-// https://sourceforge.net/p/mindboards/code/HEAD/tree/lms_nbcnxc/trunk/AT91SAM7S256/Source/c_cmd.c#l676
+/// Message opcodes; see methods in `lib.rs` for details
+/// <https://sourceforge.net/p/mindboards/code/HEAD/tree/lms_nbcnxc/trunk/AT91SAM7S256/Source/c_cmd.c#l676>
 #[derive(Copy, Clone, Debug, FromPrimitive, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Opcode {
@@ -75,6 +79,8 @@ pub enum Opcode {
 }
 
 impl Opcode {
+    /// Determine whether the opcode is a system call (`true`) or a
+    /// direct command (`false`)
     pub fn is_system(&self) -> bool {
         (*self as u8) & 0x80 != 0
     }
@@ -89,6 +95,7 @@ impl TryFrom<u8> for Opcode {
 
 #[derive(Copy, Clone, Debug, FromPrimitive, thiserror::Error)]
 #[repr(u8)]
+#[allow(clippy::missing_docs_in_private_items)]
 pub enum DeviceError {
     #[error("None")]
     None = 0x00,
@@ -174,6 +181,7 @@ impl TryFrom<u8> for DeviceError {
 }
 
 impl DeviceError {
+    /// Map the error/status value to a `Result`
     pub fn error(self) -> Result<()> {
         if let DeviceError::None = self {
             Ok(())
@@ -183,8 +191,11 @@ impl DeviceError {
     }
 }
 
+/// Types of packet, to differentiate between direct command, system
+/// calls and replies
 #[derive(Copy, Clone, Debug, FromPrimitive, PartialEq, Eq)]
 #[repr(u8)]
+#[allow(clippy::missing_docs_in_private_items)]
 pub enum PacketType {
     Direct = 0x00,
     System = 0x01,
@@ -200,11 +211,16 @@ impl TryFrom<u8> for PacketType {
     }
 }
 
+/// Packet data
 #[derive(Debug)]
 pub struct Packet {
+    /// Header - type of packet
     pub typ: PacketType,
+    /// Header - packet opcode
     pub opcode: Opcode,
+    /// Serialised packet data
     pub data: Vec<u8>,
+    /// Whan parsing, current offset into the packet data
     data_offset: usize,
 }
 
@@ -217,6 +233,7 @@ impl PartialEq for Packet {
     }
 }
 
+#[allow(clippy::missing_docs_in_private_items)]
 impl Packet {
     pub fn new(opcode: Opcode) -> Self {
         Self {
@@ -393,6 +410,8 @@ impl Packet {
         Ok(i32::from_le_bytes([b0, b1, b2, b3]))
     }
 
+    /// Read a slice of the specified length out of the packet, or an
+    /// error if insufficient data available
     pub fn read_slice(&mut self, len: usize) -> Result<&[u8]> {
         if self.data_offset + len > self.data.len() {
             return Err(Error::Parse("Requested slice too long"));

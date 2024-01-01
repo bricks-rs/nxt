@@ -2,52 +2,77 @@
 
 use crate::{DISPLAY_DATA_LEN, DISPLAY_HEIGHT, DISPLAY_WIDTH};
 
+/// Handle identifying an open file on the NXT brick
 #[derive(Debug)]
 pub struct FileHandle {
+    /// Handle identifier
     pub(crate) handle: u8,
+    /// Length available for reading/writing
     pub len: u32,
 }
 
+/// Handle identifying a file search session
 #[derive(Debug)]
 pub struct FindFileHandle {
+    /// Handle identifier
     pub(crate) handle: u8,
+    /// Name of the current discovered file
     pub name: String,
+    /// Length of the current discovered file
     pub len: u32,
 }
 
+/// Version information from the NXT brick
 #[derive(Debug)]
 pub struct FwVersion {
+    /// Protocol version?
     pub prot: (u8, u8),
+    /// Firmware version
     pub fw: (u8, u8),
 }
 
+/// Handle identifying an open module iomap
 #[derive(Debug)]
 pub struct ModuleHandle {
+    /// Handle identifier
     pub(crate) handle: u8,
+    /// Name of the opened module
     pub name: String,
+    /// ID of the opened module
     pub id: u32,
+    /// Length of the opened module?
     pub len: u32,
+    /// Length of the iomap
     pub iomap_len: u16,
 }
 
+/// Information returned by the `GetDeviceInfo` API
 #[derive(Debug)]
 pub struct DeviceInfo {
+    /// Name of the NXT brick
     pub name: String,
+    /// Address of the Bluetooth interface
     pub bt_addr: [u8; 6],
     /// Link quality of the 4 possible connected devices
     pub signal_strength: (u8, u8, u8, u8),
+    /// Available flash memory for user storage, in bytes
     pub flash: u32,
 }
 
+/// Types of buffer that can be read
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum BufType {
+    /// USB
     Usb = 0,
+    /// High speed UART
     HighSpeed = 1,
 }
 
+/// Type alias for the display raster
 pub type DisplayRaster = [[u8; DISPLAY_WIDTH]; DISPLAY_HEIGHT];
 
+/// Function to map the display iomap data onto a rectangular array
 pub fn display_data_to_raster(data: &[u8; DISPLAY_DATA_LEN]) -> DisplayRaster {
     // Display data is in a column-major format, one bit per pixel.
     // Target output is row-major format, one byte per pixel
@@ -72,6 +97,7 @@ pub fn display_data_to_raster(data: &[u8; DISPLAY_DATA_LEN]) -> DisplayRaster {
     out
 }
 
+/// Render the display raster into a string for printing to the terminal
 pub fn raster_to_string(raster: &DisplayRaster) -> String {
     raster
         .iter()

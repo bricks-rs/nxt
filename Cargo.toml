@@ -14,8 +14,12 @@ description = "USB driver for communicating with the NXT brick"
 name = "gui"
 required-features = ["examples"]
 
+[[example]]
+name = "gamepad"
+required-features = ["examples"]
+
 [features]
-examples = ["dep:eframe", "strum"]
+examples = ["strum", "dep:eframe", "dep:gilrs"]
 strum = ["dep:strum", "dep:strum_macros"]
 
 [dependencies]
@@ -29,3 +33,6 @@ strum_macros = { version = "0.25", optional = true }
 
 # required for gui
 eframe = { version = "0.24", optional = true }
+
+# required for gamepad
+gilrs = { version = "0.10", optional = true }

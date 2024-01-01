@@ -54,11 +54,11 @@ const READ_ENDPOINT: u8 = 0x82;
 const USB_INTERFACE: u8 = 0;
 
 /// Maximum length of a USB message
-const MAX_MESSAGE_LEN: usize = 58;
+pub const MAX_MESSAGE_LEN: usize = 58;
 /// Length of the brick name field
 const MAX_NAME_LEN: usize = 15;
 /// Largest inbox ID for inter-brick messaging
-const MAX_INBOX_ID: u8 = 19;
+pub const MAX_INBOX_ID: u8 = 19;
 
 /// Module ID of the display (tested on the NBC enhanced firmware, may
 /// differ for the official LEGO firmware)

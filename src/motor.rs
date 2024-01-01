@@ -1,7 +1,11 @@
+//! Types and functionality related to motor functions
+
 use crate::{Error, Result};
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 use std::ops::BitOr;
+
+pub const RUN_FOREVER: u32 = 0;
 
 // supported ports are 0, 1, 2 == A, B, C
 // 3 == AB, 4 == AC, 5 == BC, 6 == ABC

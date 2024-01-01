@@ -60,7 +60,7 @@ pub enum Opcode {
     SystemIomapwrite = 0x95,
     SystemBootcmd = 0x97,
     SystemSetbrickname = 0x98,
-    SystemBtgetadr = 0x9A,
+    SystemBtgetaddr = 0x9A,
     SystemDeviceinfo = 0x9B,
     SystemDeleteuserflash = 0xA0,
     SystemPollcmdlen = 0xA1,
@@ -130,7 +130,7 @@ pub enum DeviceError {
     ModuleNotFound = 0x90,
     #[error("out of bounds")]
     OutOfBounds = 0x91,
-    #[error("illegal file name")]
+    #[error("File does not exist")]
     IllegalName = 0x92,
     #[error("illegal handle")]
     IllegalHandle = 0x93,
@@ -150,7 +150,7 @@ pub enum DeviceError {
     InvalidChannel = 0xDF,
     #[error("specified channel/connection not configured or busy")]
     UnconfiguredChannel = 0xE0,
-    #[error("no active program")]
+    #[error("No active program")]
     NoActiveProgram = 0xEC,
     #[error("illegal size specified")]
     IllegalSize = 0xED,
@@ -337,15 +337,13 @@ impl Packet {
     }
 
     pub fn read_string(&mut self, max_len: usize) -> Result<String> {
-        let ret = self
-            .data
-            .iter()
-            .copied()
-            .skip(self.data_offset)
-            .take_while(|&c| c != 0)
-            .take(max_len)
-            .collect::<Vec<_>>();
-        self.data_offset += ret.len();
+        let mut ret = self.read_slice(max_len)?;
+        while ret.ends_with(&[0x00]) {
+            ret = ret.strip_suffix(&[0x00]).unwrap();
+        }
+        let ret = ret.to_vec();
+
+        self.data_offset += max_len;
         Ok(String::from_utf8(ret)?)
     }
 

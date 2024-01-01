@@ -1,3 +1,5 @@
+//! Types and functionality related to system functions
+
 use crate::{DISPLAY_DATA_LEN, DISPLAY_HEIGHT, DISPLAY_WIDTH};
 
 #[derive(Debug)]

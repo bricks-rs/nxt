@@ -1,4 +1,16 @@
-#![allow(clippy::too_many_arguments)]
+#![forbid(unsafe_code, unstable_features)]
+#![warn(
+    missing_docs,
+    clippy::missing_docs_in_private_items,
+    // clippy::all,
+    // clippy::pedantic
+)]
+#![allow(
+    clippy::too_many_arguments,
+    clippy::missing_errors_doc,
+    clippy::missing_panics_doc
+)]
+#![doc =include_str!("../README.md")]
 
 pub use error::{Error, Result};
 use rusb::{Device, DeviceHandle, GlobalContext, UsbContext};
@@ -22,7 +34,9 @@ use protocol::{Opcode, Packet};
 use sensor::*;
 use system::*;
 
+/// USBB vendor ID used by LEGO
 pub const NXT_VENDOR: u16 = 0x0694;
+/// USB product ID used for NXT
 pub const NXT_PRODUCT: u16 = 0x0002;
 
 const USB_TIMEOUT: Duration = Duration::from_millis(500);
@@ -32,24 +46,32 @@ const WRITE_ENDPOINT: u8 = 0x01;
 const READ_ENDPOINT: u8 = 0x82;
 const USB_INTERFACE: u8 = 0;
 
-pub const RUN_FOREVER: u32 = 0;
-
 const MAX_MESSAGE_LEN: usize = 58;
 const MAX_NAME_LEN: usize = 15;
 const MAX_INBOX_ID: u8 = 19;
 
 const MOD_DISPLAY: u32 = 0xa0001;
 const DISPLAY_DATA_OFFSET: u16 = 119;
+/// Width of NXT LCD screen in pixels
 pub const DISPLAY_WIDTH: usize = 100;
+/// Height of NXT LCD screen in pixels
 pub const DISPLAY_HEIGHT: usize = 64;
+/// Total number of LCD pixels
 pub const DISPLAY_DATA_LEN: usize = DISPLAY_WIDTH * DISPLAY_HEIGHT / 8;
+/// Chunk size to use when requesting display data from NXT. Due to the
+/// packet size restriction the display must be refreshed in chunks.
 const DISPLAY_DATA_CHUNK_SIZE: u16 = 32;
+/// Number of chunks required to retrieve the complete display data
 const DISPLAY_NUM_CHUNKS: usize =
     DISPLAY_DATA_LEN / DISPLAY_DATA_CHUNK_SIZE as usize;
 
+/// Main interface to this crate, an `NXT` represents a connection to a
+/// programmable brick.
 #[derive(Clone, Debug)]
 pub struct Nxt {
+    /// Socket device, e.g. USB or Bluetooth
     device: Arc<DeviceHandle<GlobalContext>>,
+    /// Name of the brick
     name: String,
 }
 
@@ -62,6 +84,8 @@ fn device_filter<Usb: UsbContext>(dev: &Device<Usb>) -> bool {
 }
 
 impl Nxt {
+    /// Search for plugged-in NXT devices and establish a connection to
+    /// the first one
     pub fn first() -> Result<Self> {
         let device = rusb::devices()?
             .iter()
@@ -70,6 +94,7 @@ impl Nxt {
         Self::open(device)
     }
 
+    /// Connect to all plugged-in NXT bricks and return them in a `Vec`
     pub fn all() -> Result<Vec<Self>> {
         rusb::devices()?
             .iter()
@@ -89,6 +114,7 @@ impl Nxt {
         })
     }
 
+    /// Return the name of the NXT brick
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -131,6 +157,9 @@ impl Nxt {
         self.recv(pkt.opcode)
     }
 
+    /// Convenience function to retrieve the contents of the LCD screen.
+    /// The data is in a slightly odd format; see
+    /// [system::display_data_to_raster] for details.
     pub fn get_display_data(&self) -> Result<[u8; DISPLAY_DATA_LEN]> {
         let out = [0; DISPLAY_DATA_LEN];
         let mut cur = Cursor::new(out);
@@ -148,12 +177,14 @@ impl Nxt {
         Ok(cur.into_inner())
     }
 
+    /// Retrieve the current battery level, in mV
     pub fn get_battery_level(&self) -> Result<u16> {
         let pkt = Packet::new(Opcode::DirectGetBattLevel);
         let mut recv = self.send_recv(&pkt)?;
         recv.read_u16()
     }
 
+    /// Read firmware versions from the NXT brick
     pub fn get_firmware_version(&self) -> Result<FwVersion> {
         let pkt = Packet::new(Opcode::SystemVersions);
         let mut recv = self.send_recv(&pkt)?;
@@ -167,17 +198,23 @@ impl Nxt {
         })
     }
 
+    /// Start running the program with the specified name. Returns an
+    /// `ERR_RC_ILLEGAL_VAL` error if the file does not exist.
     pub fn start_program(&self, name: &str) -> Result<()> {
         let mut pkt = Packet::new(Opcode::DirectStartProgram);
         pkt.push_filename(name)?;
         self.send(&pkt, true)
     }
 
+    /// Stop the currently executing program. Returns an `ERR_NO_PROG`
+    /// error if there is no program running.
     pub fn stop_program(&self) -> Result<()> {
         let pkt = Packet::new(Opcode::DirectStopProgram);
         self.send(&pkt, true)
     }
 
+    /// Play the specified sound file. Returns an `ERR_RC_ILLEGAL_VAL`
+    /// if the file does not exist
     pub fn play_sound(&self, file: &str, loop_: bool) -> Result<()> {
         let mut pkt = Packet::new(Opcode::DirectPlaySoundFile);
         pkt.push_bool(loop_);
@@ -185,6 +222,7 @@ impl Nxt {
         self.send(&pkt, true)
     }
 
+    /// Play the specified tone for the given duration.
     pub fn play_tone(&self, freq: u16, duration_ms: u16) -> Result<()> {
         let mut pkt = Packet::new(Opcode::DirectPlayTone);
         pkt.push_u16(freq);
@@ -192,6 +230,7 @@ impl Nxt {
         self.send(&pkt, true)
     }
 
+    /// Set the output state for the given individual or compound port
     pub fn set_output_state(
         &self,
         port: OutPort,
@@ -213,6 +252,7 @@ impl Nxt {
         self.send(&pkt, true)
     }
 
+    /// Set the given input to the specified mode
     pub fn set_input_mode(
         &self,
         port: InPort,
@@ -226,6 +266,9 @@ impl Nxt {
         self.send(&pkt, true)
     }
 
+    /// Retrieve the state of the specified output. Returns an
+    /// `ERR_RC_ILLEGAL_VAL` if the port is not a valid single port
+    /// specification
     pub fn get_output_state(&self, port: OutPort) -> Result<OutputState> {
         let mut pkt = Packet::new(Opcode::DirectGetOutState);
         pkt.push_u8(port as u8);
@@ -256,6 +299,7 @@ impl Nxt {
         })
     }
 
+    /// Retrieve the state of the specified input port
     pub fn get_input_values(&self, port: InPort) -> Result<InputValues> {
         let mut pkt = Packet::new(Opcode::DirectGetInVals);
         pkt.push_u8(port as u8);
@@ -285,12 +329,17 @@ impl Nxt {
         })
     }
 
+    /// Reset the scaled value of the spcified input port, e.g. clears
+    /// the edge or pulse counter.
     pub fn reset_input_scaled_value(&self, port: InPort) -> Result<()> {
         let mut pkt = Packet::new(Opcode::DirectResetInVal);
         pkt.push_u8(port as u8);
         self.send(&pkt, true)
     }
 
+    /// Write a message to the specified inbox. Returns an error if the
+    /// inbox ID is greater than [`MAX_INBOX_ID`] or of the message is
+    /// longer than [`MAX_MESSAGE_LEN`] bytes
     pub fn message_write(&self, inbox: u8, message: &[u8]) -> Result<()> {
         if inbox > MAX_INBOX_ID {
             return Err(Error::Serialise("Invalid mailbox ID"));
@@ -307,6 +356,12 @@ impl Nxt {
         self.send(&pkt, true)
     }
 
+    /// Reset the motor position counter. Returns an `ERR_RC_ILLEGAL_VAL`
+    /// if the port is not an individual port specification.
+    ///
+    /// * `relative`:
+    ///   * `TRUE`: reset position relative to last motor control block
+    ///   * `FALSE`: reset position relative to start of last program
     pub fn reset_motor_position(
         &self,
         port: OutPort,
@@ -318,11 +373,13 @@ impl Nxt {
         self.send(&pkt, true)
     }
 
+    /// Stop playing the current sound file, if any
     pub fn stop_sound_playback(&self) -> Result<()> {
         let pkt = Packet::new(Opcode::DirectStopSound);
         self.send(&pkt, true)
     }
 
+    /// Reset the sleep timer and return the sleep timeout
     pub fn keep_alive(&self) -> Result<u32> {
         let pkt = Packet::new(Opcode::DirectKeepAlive);
         self.send(&pkt, false)?;
@@ -330,6 +387,7 @@ impl Nxt {
         recv.read_u32()
     }
 
+    /// Retrieve the status of the specified low speed port
     pub fn ls_get_status(&self, port: InPort) -> Result<u8> {
         let mut pkt = Packet::new(Opcode::DirectLsGetStatus);
         pkt.push_u8(port as u8);
@@ -338,6 +396,8 @@ impl Nxt {
         recv.read_u8()
     }
 
+    /// Write the provided data to the low speed bus on the given port
+    /// and read the  specified number of bytes in response
     pub fn ls_write(
         &self,
         port: InPort,
@@ -358,6 +418,7 @@ impl Nxt {
         self.send(&pkt, true)
     }
 
+    /// Read data from the low speed port
     pub fn ls_read(&self, port: InPort) -> Result<Vec<u8>> {
         let mut pkt = Packet::new(Opcode::DirectLsRead);
         pkt.push_u8(port as u8);
@@ -368,6 +429,8 @@ impl Nxt {
         Ok(data.to_vec())
     }
 
+    /// Get the name of the currently running program. Returns
+    /// `ERR_NO_PROG` if there is no program currently running
     pub fn get_current_program_name(&self) -> Result<String> {
         let pkt = Packet::new(Opcode::DirectGetCurrProgram);
         self.send(&pkt, false)?;
@@ -375,6 +438,7 @@ impl Nxt {
         recv.read_filename()
     }
 
+    /// Read a message from the specified mailbox
     pub fn message_read(
         &self,
         remote_inbox: u8,
@@ -393,15 +457,7 @@ impl Nxt {
         Ok(data.to_vec())
     }
 
-    pub fn file_open_read(&self, name: &str) -> Result<FileHandle> {
-        let mut pkt = Packet::new(Opcode::SystemOpenread);
-        pkt.push_filename(name)?;
-        let mut recv = self.send_recv(&pkt)?;
-        let handle = recv.read_u8()?;
-        let len = recv.read_u32()?;
-        Ok(FileHandle { handle, len })
-    }
-
+    /// Open the specified file for writing and return its handle
     pub fn file_open_write(&self, name: &str, len: u32) -> Result<FileHandle> {
         let mut pkt = Packet::new(Opcode::SystemOpenwrite);
         pkt.push_filename(name)?;
@@ -411,17 +467,7 @@ impl Nxt {
         Ok(FileHandle { handle, len })
     }
 
-    pub fn file_read(&self, handle: &FileHandle, len: u32) -> Result<Vec<u8>> {
-        let mut pkt = Packet::new(Opcode::SystemOpenread);
-        pkt.push_u8(handle.handle);
-        pkt.push_u32(len);
-        let mut recv = self.send_recv(&pkt)?;
-        let _handle = recv.read_u8()?;
-        let len = recv.read_u8()?;
-        let data = recv.read_slice(len as usize)?;
-        Ok(data.to_vec())
-    }
-
+    /// Write the provided data to the previously opened file
     pub fn file_write(&self, handle: &FileHandle, data: &[u8]) -> Result<u32> {
         let mut pkt = Packet::new(Opcode::SystemWrite);
         pkt.push_u8(handle.handle);
@@ -431,54 +477,7 @@ impl Nxt {
         recv.read_u32()
     }
 
-    pub fn file_close(&self, handle: &FileHandle) -> Result<()> {
-        let mut pkt = Packet::new(Opcode::SystemClose);
-        pkt.push_u8(handle.handle);
-        self.send(&pkt, true)
-    }
-
-    pub fn file_delete(&self, name: &str) -> Result<()> {
-        let mut pkt = Packet::new(Opcode::SystemDelete);
-        pkt.push_filename(name)?;
-        self.send(&pkt, true)
-    }
-
-    pub fn file_find_first(&self, pattern: &str) -> Result<FindFileHandle> {
-        let mut pkt = Packet::new(Opcode::SystemFindfirst);
-        pkt.push_filename(pattern)?;
-        let mut recv = self.send_recv(&pkt)?;
-        let handle = recv.read_u8()?;
-        let name = recv.read_filename()?;
-        let len = recv.read_u32()?;
-        Ok(FindFileHandle { handle, name, len })
-    }
-
-    pub fn file_find_next(
-        &self,
-        handle: &FindFileHandle,
-    ) -> Result<FindFileHandle> {
-        let mut pkt = Packet::new(Opcode::SystemFindnext);
-        pkt.push_u8(handle.handle);
-        let mut recv = self.send_recv(&pkt)?;
-        let handle = recv.read_u8()?;
-        let name = recv.read_filename()?;
-        let len = recv.read_u32()?;
-        Ok(FindFileHandle { handle, name, len })
-    }
-
-    pub fn file_open_write_linear(
-        &self,
-        name: &str,
-        len: u32,
-    ) -> Result<FileHandle> {
-        let mut pkt = Packet::new(Opcode::SystemOpenwritelinear);
-        pkt.push_filename(name)?;
-        pkt.push_u32(len);
-        let mut recv = self.send_recv(&pkt)?;
-        let handle = recv.read_u8()?;
-        Ok(FileHandle { handle, len })
-    }
-
+    /// Open the specified file in `write data` mode and return its handle
     pub fn file_open_write_data(
         &self,
         name: &str,
@@ -492,6 +491,7 @@ impl Nxt {
         Ok(FileHandle { handle, len })
     }
 
+    /// Open the specified file in `append` mode and return its handle
     pub fn file_open_append_data(&self, name: &str) -> Result<FileHandle> {
         let mut pkt = Packet::new(Opcode::SystemOpenappenddata);
         pkt.push_filename(name)?;
@@ -501,6 +501,99 @@ impl Nxt {
         Ok(FileHandle { handle, len })
     }
 
+    /// Close the specified file handle
+    pub fn file_close(&self, handle: &FileHandle) -> Result<()> {
+        let mut pkt = Packet::new(Opcode::SystemClose);
+        pkt.push_u8(handle.handle);
+        self.send(&pkt, true)
+    }
+
+    /// Open the specified file for reading and return its handle
+    pub fn file_open_read(&self, name: &str) -> Result<FileHandle> {
+        let mut pkt = Packet::new(Opcode::SystemOpenread);
+        pkt.push_filename(name)?;
+        let mut recv = self.send_recv(&pkt)?;
+        let handle = recv.read_u8()?;
+        let len = recv.read_u32()?;
+        Ok(FileHandle { handle, len })
+    }
+
+    /// Read data from the previously opened file
+    pub fn file_read(&self, handle: &FileHandle, len: u32) -> Result<Vec<u8>> {
+        let mut pkt = Packet::new(Opcode::SystemOpenread);
+        pkt.push_u8(handle.handle);
+        pkt.push_u32(len);
+        let mut recv = self.send_recv(&pkt)?;
+        let _handle = recv.read_u8()?;
+        let len = recv.read_u8()?;
+        let data = recv.read_slice(len as usize)?;
+        Ok(data.to_vec())
+    }
+
+    /// Delete the named file
+    pub fn file_delete(&self, name: &str) -> Result<()> {
+        let mut pkt = Packet::new(Opcode::SystemDelete);
+        pkt.push_filename(name)?;
+        self.send(&pkt, true)
+    }
+
+    /// Search for a file matching the specified pattern and return a
+    /// handle to the search state
+    pub fn file_find_first(&self, pattern: &str) -> Result<FindFileHandle> {
+        let mut pkt = Packet::new(Opcode::SystemFindfirst);
+        pkt.push_filename(pattern)?;
+        let mut recv = self.send_recv(&pkt)?;
+        let handle = recv.read_u8()?;
+        let name = recv.read_filename()?;
+        let len = recv.read_u32()?;
+        Ok(FindFileHandle { handle, name, len })
+    }
+
+    /// Take a search handle and return the next match, or an error if
+    /// there are no further matches
+    pub fn file_find_next(
+        &self,
+        handle: &FindFileHandle,
+    ) -> Result<FindFileHandle> {
+        let mut pkt = Packet::new(Opcode::SystemFindnext);
+        pkt.push_u8(handle.handle);
+        let mut recv = self.send_recv(&pkt)?;
+        let handle = recv.read_u8()?;
+        let name = recv.read_filename()?;
+        let len = recv.read_u32()?;
+        Ok(FindFileHandle { handle, name, len })
+    }
+
+    /// Souce code just says `For internal use only`
+    pub fn file_open_read_linear(
+        &self,
+        name: &str,
+        len: u32,
+    ) -> Result<FileHandle> {
+        let mut pkt = Packet::new(Opcode::SystemOpenreadlinear);
+        pkt.push_filename(name)?;
+        pkt.push_u32(len);
+        let mut recv = self.send_recv(&pkt)?;
+        let handle = recv.read_u8()?;
+        Ok(FileHandle { handle, len })
+    }
+
+    /// Souce code just says `For internal use only`
+    pub fn file_open_write_linear(
+        &self,
+        name: &str,
+        len: u32,
+    ) -> Result<FileHandle> {
+        let mut pkt = Packet::new(Opcode::SystemOpenwritelinear);
+        pkt.push_filename(name)?;
+        pkt.push_u32(len);
+        let mut recv = self.send_recv(&pkt)?;
+        let handle = recv.read_u8()?;
+        Ok(FileHandle { handle, len })
+    }
+
+    /// Search for a module matching the specified pattern and return a
+    /// handle to the search state
     pub fn module_find_first(&self, pattern: &str) -> Result<ModuleHandle> {
         let mut pkt = Packet::new(Opcode::SystemFindfirstmodule);
         pkt.push_filename(pattern)?;
@@ -519,6 +612,8 @@ impl Nxt {
         })
     }
 
+    /// Take a search handle and return the next match, or an error if
+    /// there are no further matches
     pub fn module_find_next(
         &self,
         handle: &ModuleHandle,
@@ -540,12 +635,15 @@ impl Nxt {
         })
     }
 
+    /// Close the provided module handle
     pub fn module_close(&self, handle: &ModuleHandle) -> Result<()> {
         let mut pkt = Packet::new(Opcode::SystemClosemodhandle);
         pkt.push_u8(handle.handle);
         self.send(&pkt, true)
     }
 
+    /// Read `count` bytes from the IO map belonging to the specified
+    /// module at the given offset
     pub fn read_io_map(
         &self,
         mod_id: u32,
@@ -563,6 +661,8 @@ impl Nxt {
         Ok(data.to_vec())
     }
 
+    /// Write the provided data into the IO map belongint to the
+    /// specified module at the given offset
     pub fn write_io_map(
         &self,
         mod_id: u32,
@@ -579,6 +679,9 @@ impl Nxt {
         recv.read_u16()
     }
 
+    /// Enter firmware update mode - warning, this is not recoverable
+    /// without loading new firmware (not currently supported by this
+    /// crate)
     pub fn boot(&self, sure: bool) -> Result<Vec<u8>> {
         if !sure {
             return Err(Error::Serialise(
@@ -592,12 +695,26 @@ impl Nxt {
         Ok(recv.read_slice(4)?.to_vec())
     }
 
+    /// Set the NXT brick's name to the provided value
     pub fn set_brick_name(&self, name: &str) -> Result<()> {
         let mut pkt = Packet::new(Opcode::SystemSetbrickname);
         pkt.push_str(name, MAX_NAME_LEN)?;
         self.send(&pkt, true)
     }
 
+    /// Retrieve the Bluetooth address of the brick
+    pub fn get_bt_addr(&self) -> Result<[u8; 6]> {
+        let pkt = Packet::new(Opcode::SystemBtgetaddr);
+        let mut recv = self.send_recv(&pkt)?;
+        let addr = recv.read_slice(6)?;
+        Ok(addr.try_into().unwrap())
+    }
+
+    /// Retrieve general device information from the brick:
+    /// * Brick name
+    /// * Bluetooth address
+    /// * Signal strength of connected bricks
+    /// * Available flash memory
     pub fn get_device_info(&self) -> Result<DeviceInfo> {
         let pkt = Packet::new(Opcode::SystemDeviceinfo);
         let mut recv = self.send_recv(&pkt)?;
@@ -628,11 +745,13 @@ impl Nxt {
         })
     }
 
+    /// Delete user flash storage
     pub fn delete_user_flash(&self) -> Result<()> {
         let pkt = Packet::new(Opcode::SystemDeleteuserflash);
         self.send(&pkt, true)
     }
 
+    /// Poll the USB buffer for a command?
     pub fn poll_command_length(&self, buf: BufType) -> Result<u8> {
         let mut pkt = Packet::new(Opcode::SystemPollcmdlen);
         pkt.push_u8(buf as u8);
@@ -641,6 +760,7 @@ impl Nxt {
         recv.read_u8()
     }
 
+    /// Poll the USB buffer for a command?
     pub fn poll_command(&self, buf: BufType, len: u8) -> Result<Vec<u8>> {
         let mut pkt = Packet::new(Opcode::SystemPollcmd);
         pkt.push_u8(buf as u8);
@@ -652,6 +772,7 @@ impl Nxt {
         Ok(data.to_vec())
     }
 
+    /// Factory reset the bluetooth module
     pub fn bluetooth_factory_reset(&self) -> Result<()> {
         let pkt = Packet::new(Opcode::SystemBtfactoryreset);
         self.send(&pkt, true)

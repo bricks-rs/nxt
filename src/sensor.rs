@@ -1,3 +1,5 @@
+//! Types and functionality related to sensor & input functions
+
 use crate::{Error, Result};
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;

@@ -2,13 +2,14 @@
 #![warn(
     missing_docs,
     clippy::missing_docs_in_private_items,
-    // clippy::all,
-    // clippy::pedantic
+    clippy::nursery,
+    clippy::pedantic
 )]
 #![allow(
     clippy::too_many_arguments,
     clippy::missing_errors_doc,
-    clippy::missing_panics_doc
+    clippy::missing_panics_doc,
+    clippy::module_name_repetitions
 )]
 #![doc =include_str!("../README.md")]
 
@@ -29,10 +30,12 @@ mod protocol;
 pub mod sensor;
 pub mod system;
 
-use motor::*;
+use motor::{OutMode, OutPort, OutputState, RegulationMode, RunState};
 use protocol::{Opcode, Packet};
-use sensor::*;
-use system::*;
+use sensor::{InPort, InputValues, SensorMode, SensorType};
+use system::{
+    BufType, DeviceInfo, FileHandle, FindFileHandle, FwVersion, ModuleHandle,
+};
 
 /// USBB vendor ID used by LEGO
 pub const NXT_VENDOR: u16 = 0x0694;
@@ -73,8 +76,9 @@ pub const DISPLAY_DATA_LEN: usize = DISPLAY_WIDTH * DISPLAY_HEIGHT / 8;
 /// packet size restriction the display must be refreshed in chunks.
 const DISPLAY_DATA_CHUNK_SIZE: u16 = 32;
 /// Number of chunks required to retrieve the complete display data
-const DISPLAY_NUM_CHUNKS: usize =
-    DISPLAY_DATA_LEN / DISPLAY_DATA_CHUNK_SIZE as usize;
+#[allow(clippy::cast_possible_truncation)]
+const DISPLAY_NUM_CHUNKS: u16 =
+    DISPLAY_DATA_LEN as u16 / DISPLAY_DATA_CHUNK_SIZE;
 
 /// Main interface to this crate, an `NXT` represents a connection to a
 /// programmable brick.
@@ -89,11 +93,9 @@ pub struct Nxt {
 /// Filter method to check the vendor and product ID on a USB device,
 /// returning `true` if they match an NXT brick
 fn device_filter<Usb: UsbContext>(dev: &Device<Usb>) -> bool {
-    if let Ok(desc) = dev.device_descriptor() {
+    dev.device_descriptor().map_or(false, |desc| {
         desc.vendor_id() == NXT_VENDOR && desc.product_id() == NXT_PRODUCT
-    } else {
-        false
-    }
+    })
 }
 
 impl Nxt {
@@ -112,16 +114,17 @@ impl Nxt {
         rusb::devices()?
             .iter()
             .filter(device_filter)
-            .map(Nxt::open)
+            .map(Self::open)
             .collect()
     }
 
-    /// Connect to the provided USB device and claim the [USB_INTERFACE]
+    /// Connect to the provided USB device and claim the [`USB_INTERFACE`]
     /// interface on it
+    #[allow(clippy::needless_pass_by_value)]
     fn open(device: Device<GlobalContext>) -> Result<Self> {
         let mut device = device.open()?;
         device.claim_interface(USB_INTERFACE)?;
-        let mut nxt = Nxt {
+        let mut nxt = Self {
             device: device.into(),
             name: String::new(),
         };
@@ -131,6 +134,7 @@ impl Nxt {
     }
 
     /// Return the name of the NXT brick
+    #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -145,13 +149,13 @@ impl Nxt {
         let written =
             self.device
                 .write_bulk(WRITE_ENDPOINT, serialised, USB_TIMEOUT)?;
-        if written != serialised.len() {
-            Err(Error::Write)
-        } else {
+        if written == serialised.len() {
             if check_status {
                 let _recv = self.recv(pkt.opcode)?;
             }
             Ok(())
+        } else {
+            Err(Error::Write)
         }
     }
 
@@ -166,10 +170,10 @@ impl Nxt {
         let buf = &buf[..read];
         let mut recv = Packet::parse(buf)?;
         recv.check_status()?;
-        if recv.opcode != opcode {
-            Err(Error::ReplyMismatch)
-        } else {
+        if recv.opcode == opcode {
             Ok(recv)
+        } else {
+            Err(Error::ReplyMismatch)
         }
     }
 
@@ -183,15 +187,14 @@ impl Nxt {
 
     /// Convenience function to retrieve the contents of the LCD screen.
     /// The data is in a slightly odd format; see
-    /// [system::display_data_to_raster] for details.
+    /// [`system::display_data_to_raster`] for details.
     pub fn get_display_data(&self) -> Result<[u8; DISPLAY_DATA_LEN]> {
         let out = [0; DISPLAY_DATA_LEN];
         let mut cur = Cursor::new(out);
         for chunk_idx in 0..DISPLAY_NUM_CHUNKS {
             let data = self.read_io_map(
                 MOD_DISPLAY,
-                DISPLAY_DATA_OFFSET
-                    + chunk_idx as u16 * DISPLAY_DATA_CHUNK_SIZE,
+                DISPLAY_DATA_OFFSET + chunk_idx * DISPLAY_DATA_CHUNK_SIZE,
                 DISPLAY_DATA_CHUNK_SIZE,
             )?;
             assert_eq!(data.len(), DISPLAY_DATA_CHUNK_SIZE.into());
@@ -374,6 +377,8 @@ impl Nxt {
 
         let mut pkt = Packet::new(Opcode::DirectMessageWrite);
         pkt.push_u8(inbox);
+        // data length has already been checked
+        #[allow(clippy::cast_possible_truncation)]
         pkt.push_u8(message.len() as u8 + 1);
         pkt.push_slice(message);
         pkt.push_u8(0);
@@ -428,14 +433,16 @@ impl Nxt {
         tx_data: &[u8],
         rx_bytes: u8,
     ) -> Result<()> {
-        // unsure what limit should be here
-        // TODO fuzz the lengths or check fw source
-        if tx_data.len() > u8::MAX as usize {
+        // unsure what limit should be here, go with max packet size for
+        // now
+        if tx_data.len() > MAX_MESSAGE_LEN {
             return Err(Error::Serialise("Data too long"));
         }
 
         let mut pkt = Packet::new(Opcode::DirectLsWrite);
         pkt.push_u8(port as u8);
+        // data length has already been checked
+        #[allow(clippy::cast_possible_truncation)]
         pkt.push_u8(tx_data.len() as u8);
         pkt.push_u8(rx_bytes);
         pkt.push_slice(tx_data);

@@ -93,7 +93,7 @@ impl TryFrom<u8> for SensorMode {
     }
 }
 
-/// Data returned by the ``GetInputState` API
+/// Data returned by the `GetInputState` API
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[allow(missing_docs)]
 pub struct InputValues {

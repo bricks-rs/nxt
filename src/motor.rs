@@ -49,7 +49,7 @@ impl OutMode {
     pub const BRAKE: Self = Self(0x02);
     /// Try to maintain a constant angular velocity by dynamically
     /// adjusting the power, or try to keep two motors synchronised (see
-    /// also [RegulationMode]).
+    /// also [`RegulationMode`]).
     pub const REGULATED: Self = Self(0x04);
 }
 
@@ -59,9 +59,9 @@ impl From<u8> for OutMode {
     }
 }
 
-impl BitOr<OutMode> for OutMode {
+impl BitOr<Self> for OutMode {
     type Output = Self;
-    fn bitor(self, other: OutMode) -> Self {
+    fn bitor(self, other: Self) -> Self {
         Self(self.0 | other.0)
     }
 }

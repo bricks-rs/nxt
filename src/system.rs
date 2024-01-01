@@ -73,6 +73,7 @@ pub enum BufType {
 pub type DisplayRaster = [[u8; DISPLAY_WIDTH]; DISPLAY_HEIGHT];
 
 /// Function to map the display iomap data onto a rectangular array
+#[must_use]
 pub fn display_data_to_raster(data: &[u8; DISPLAY_DATA_LEN]) -> DisplayRaster {
     // Display data is in a column-major format, one bit per pixel.
     // Target output is row-major format, one byte per pixel
@@ -98,6 +99,7 @@ pub fn display_data_to_raster(data: &[u8; DISPLAY_DATA_LEN]) -> DisplayRaster {
 }
 
 /// Render the display raster into a string for printing to the terminal
+#[must_use]
 pub fn raster_to_string(raster: &DisplayRaster) -> String {
     raster
         .iter()

@@ -81,8 +81,8 @@ pub enum Opcode {
 impl Opcode {
     /// Determine whether the opcode is a system call (`true`) or a
     /// direct command (`false`)
-    pub fn is_system(&self) -> bool {
-        (*self as u8) & 0x80 != 0
+    pub const fn is_system(self) -> bool {
+        (self as u8) & 0x80 != 0
     }
 }
 
@@ -182,8 +182,8 @@ impl TryFrom<u8> for DeviceError {
 
 impl DeviceError {
     /// Map the error/status value to a `Result`
-    pub fn error(self) -> Result<()> {
-        if let DeviceError::None = self {
+    pub const fn error(self) -> Result<()> {
+        if matches!(self, Self::None) {
             Ok(())
         } else {
             Err(Error::Device(self))
@@ -226,7 +226,9 @@ pub struct Packet {
 
 impl Eq for Packet {}
 impl PartialEq for Packet {
-    fn eq(&self, rhs: &Packet) -> bool {
+    // clippy flags the rhs.data_offset as suspicious, but it's correct
+    #[allow(clippy::suspicious_operation_groupings)]
+    fn eq(&self, rhs: &Self) -> bool {
         self.typ == rhs.typ
             && self.opcode == rhs.opcode
             && self.data[self.data_offset..] == rhs.data[rhs.data_offset..]
@@ -235,7 +237,7 @@ impl PartialEq for Packet {
 
 #[allow(clippy::missing_docs_in_private_items)]
 impl Packet {
-    pub fn new(opcode: Opcode) -> Self {
+    pub const fn new(opcode: Opcode) -> Self {
         Self {
             typ: if opcode.is_system() {
                 PacketType::System
@@ -277,7 +279,7 @@ impl Packet {
         cur.write_all(&[self.typ as u8, self.opcode as u8])?;
         cur.write_all(&self.data)?;
 
-        let len = cur.position() as usize;
+        let len = usize::try_from(cur.position()).unwrap();
         let buf = cur.into_inner();
         Ok(&buf[..len])
     }
@@ -313,7 +315,7 @@ impl Packet {
     }
 
     pub fn push_bool(&mut self, val: bool) {
-        self.data.push(val as u8);
+        self.data.push(val.into());
     }
 
     pub fn push_u8(&mut self, val: u8) {

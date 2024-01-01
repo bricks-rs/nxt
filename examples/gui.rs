@@ -27,7 +27,7 @@ struct Motor {
 
 enum Message {
     Sensors(Vec<InputValues>),
-    Display(DisplayRaster),
+    Display(Box<DisplayRaster>),
 }
 
 impl App {
@@ -61,7 +61,7 @@ impl eframe::App for App {
             if let Some(message) = self.sensor_poll_handle.recv() {
                 match message {
                     Message::Sensors(values) => self.sensors = values,
-                    Message::Display(raster) => self.display = Some(raster),
+                    Message::Display(raster) => self.display = Some(*raster),
                 }
             }
 
@@ -209,6 +209,7 @@ fn display_ui(ui: &mut egui::Ui, display: &DisplayRaster) {
     egui::Frame::canvas(ui.style()).show(ui, |ui| {
         let position = ui.available_rect_before_wrap().min.to_vec2();
 
+        #[allow(clippy::needless_range_loop)]
         for row in 0..DISPLAY_HEIGHT {
             for col in 0..DISPLAY_WIDTH {
                 let x1 = row * DISPLAY_PX_SCALE;
@@ -281,7 +282,9 @@ impl SensorPollHandle {
                 let screen = nxt.get_display_data().unwrap();
                 if screen != old_screen {
                     val_tx
-                        .send(Message::Display(display_data_to_raster(&screen)))
+                        .send(Message::Display(Box::new(
+                            display_data_to_raster(&screen),
+                        )))
                         .unwrap();
                     old_screen = screen;
                     ctx.request_repaint();

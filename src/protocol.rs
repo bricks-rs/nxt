@@ -362,7 +362,6 @@ impl Packet {
         }
         let ret = ret.to_vec();
 
-        self.data_offset += max_len;
         Ok(String::from_utf8(ret)?)
     }
 

@@ -3,7 +3,7 @@ use nxtusb::{motor::*, *};
 const POWER: i8 = 80;
 
 fn main() -> nxtusb::Result<()> {
-    let nxt = Nxt::first()?;
+    let nxt = Nxt::first_usb()?;
 
     println!("Running motor A at {POWER}");
     nxt.set_output_state(

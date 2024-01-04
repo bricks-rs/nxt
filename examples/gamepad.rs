@@ -65,7 +65,7 @@ fn main() -> Result {
         println!("{} is {:?}", gamepad.name(), gamepad.power_info());
     }
 
-    let nxt = Nxt::first()?;
+    let nxt = Nxt::first_usb()?;
 
     let mut active_gamepad = None;
     let mut robot = Robot::new(nxt);

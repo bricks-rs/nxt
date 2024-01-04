@@ -1,7 +1,7 @@
 use nxtusb::{sensor::*, *};
 
 fn main() -> nxtusb::Result<()> {
-    let nxt = Nxt::first()?;
+    let nxt = Nxt::first_usb()?;
 
     println!("Set input mode");
     nxt.set_input_mode(InPort::S1, SensorType::Switch, SensorMode::Bool)?;

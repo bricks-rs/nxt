@@ -14,11 +14,10 @@
 #![doc =include_str!("../README.md")]
 
 pub use error::{Error, Result};
-use rusb::{Device, DeviceHandle, GlobalContext, UsbContext};
+
 use std::{
     io::{Cursor, Write},
     sync::Arc,
-    time::Duration,
 };
 
 #[cfg(feature = "strum")]
@@ -28,30 +27,16 @@ mod error;
 pub mod motor;
 mod protocol;
 pub mod sensor;
+mod socket;
 pub mod system;
 
 use motor::{OutMode, OutPort, OutputState, RegulationMode, RunState};
 use protocol::{Opcode, Packet};
 use sensor::{InPort, InputValues, SensorMode, SensorType};
+use socket::Socket;
 use system::{
     BufType, DeviceInfo, FileHandle, FindFileHandle, FwVersion, ModuleHandle,
 };
-
-/// USBB vendor ID used by LEGO
-pub const NXT_VENDOR: u16 = 0x0694;
-/// USB product ID used for NXT
-pub const NXT_PRODUCT: u16 = 0x0002;
-
-/// Timeout on the USB connection
-const USB_TIMEOUT: Duration = Duration::from_millis(500);
-/// USB endpoint address for sending write requests to
-/// <https://sourceforge.net/p/mindboards/code/HEAD/tree/lms_nbcnxc/trunk/AT91SAM7S256/Source/d_usb.c>
-const WRITE_ENDPOINT: u8 = 0x01;
-/// USB endpoint address for sending read requests to
-/// <https://sourceforge.net/p/mindboards/code/HEAD/tree/lms_nbcnxc/trunk/AT91SAM7S256/Source/d_usb.c>
-const READ_ENDPOINT: u8 = 0x82;
-/// USB interface ID used by the NXT brick
-const USB_INTERFACE: u8 = 0;
 
 /// Maximum length of a USB message
 pub const MAX_MESSAGE_LEN: usize = 58;
@@ -82,50 +67,35 @@ const DISPLAY_NUM_CHUNKS: u16 =
 
 /// Main interface to this crate, an `NXT` represents a connection to a
 /// programmable brick.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Nxt {
     /// Socket device, e.g. USB or Bluetooth
-    device: Arc<DeviceHandle<GlobalContext>>,
+    device: Arc<dyn Socket>,
     /// Name of the brick
     name: String,
-}
-
-/// Filter method to check the vendor and product ID on a USB device,
-/// returning `true` if they match an NXT brick
-fn device_filter<Usb: UsbContext>(dev: &Device<Usb>) -> bool {
-    dev.device_descriptor().map_or(false, |desc| {
-        desc.vendor_id() == NXT_VENDOR && desc.product_id() == NXT_PRODUCT
-    })
 }
 
 impl Nxt {
     /// Search for plugged-in NXT devices and establish a connection to
     /// the first one
-    pub fn first() -> Result<Self> {
-        let device = rusb::devices()?
-            .iter()
-            .find(device_filter)
-            .ok_or(Error::NoBrick)?;
-        Self::open(device)
+    pub fn first_usb() -> Result<Self> {
+        let device = socket::usb::Usb::first()?;
+        Self::init(Arc::new(device))
     }
 
     /// Connect to all plugged-in NXT bricks and return them in a `Vec`
-    pub fn all() -> Result<Vec<Self>> {
-        rusb::devices()?
-            .iter()
-            .filter(device_filter)
-            .map(Self::open)
+    pub fn all_usb() -> Result<Vec<Self>> {
+        let devices = socket::usb::Usb::all()?;
+        devices
+            .into_iter()
+            .map(|device| Self::init(Arc::new(device)))
             .collect()
     }
 
-    /// Connect to the provided USB device and claim the [`USB_INTERFACE`]
-    /// interface on it
-    #[allow(clippy::needless_pass_by_value)]
-    fn open(device: Device<GlobalContext>) -> Result<Self> {
-        let mut device = device.open()?;
-        device.claim_interface(USB_INTERFACE)?;
+    /// Initialise an NXT struct from the given device
+    fn init(device: Arc<dyn Socket>) -> Result<Self> {
         let mut nxt = Self {
-            device: device.into(),
+            device,
             name: String::new(),
         };
         let info = nxt.get_device_info()?;
@@ -146,9 +116,7 @@ impl Nxt {
         let mut buf = [0; 64];
         let serialised = pkt.serialise(&mut buf)?;
 
-        let written =
-            self.device
-                .write_bulk(WRITE_ENDPOINT, serialised, USB_TIMEOUT)?;
+        let written = self.device.send(serialised)?;
         if written == serialised.len() {
             if check_status {
                 let _recv = self.recv(pkt.opcode)?;
@@ -163,11 +131,8 @@ impl Nxt {
     /// the expected value
     fn recv(&self, opcode: Opcode) -> Result<Packet> {
         let mut buf = [0; 64];
-        let read =
-            self.device
-                .read_bulk(READ_ENDPOINT, &mut buf, USB_TIMEOUT)?;
+        let buf = self.device.recv(&mut buf)?;
 
-        let buf = &buf[..read];
         let mut recv = Packet::parse(buf)?;
         recv.check_status()?;
         if recv.opcode == opcode {

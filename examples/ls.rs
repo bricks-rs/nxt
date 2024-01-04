@@ -1,7 +1,7 @@
 use nxtusb::*;
 
 fn main() -> nxtusb::Result<()> {
-    let nxt = Nxt::first()?;
+    let nxt = Nxt::first_usb()?;
 
     println!("List files");
 

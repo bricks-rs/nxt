@@ -1,7 +1,7 @@
 use nxtusb::Nxt;
 
 fn main() -> nxtusb::Result<()> {
-    let nxt = Nxt::all()?;
+    let nxt = Nxt::all_usb()?;
 
     println!("Found {} NXT bricks", nxt.len());
 

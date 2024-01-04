@@ -78,12 +78,14 @@ pub struct Nxt {
 impl Nxt {
     /// Search for plugged-in NXT devices and establish a connection to
     /// the first one
+    #[cfg(feature = "usb")]
     pub fn first_usb() -> Result<Self> {
         let device = socket::usb::Usb::first()?;
         Self::init(Arc::new(device))
     }
 
     /// Connect to all plugged-in NXT bricks and return them in a `Vec`
+    #[cfg(feature = "usb")]
     pub fn all_usb() -> Result<Vec<Self>> {
         let devices = socket::usb::Usb::all()?;
         devices
@@ -93,7 +95,7 @@ impl Nxt {
     }
 
     /// Initialise an NXT struct from the given device
-    fn init(device: Arc<dyn Socket>) -> Result<Self> {
+    pub fn init(device: Arc<dyn Socket>) -> Result<Self> {
         let mut nxt = Self {
             device,
             name: String::new(),

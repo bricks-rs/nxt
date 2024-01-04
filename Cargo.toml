@@ -19,14 +19,18 @@ name = "gamepad"
 required-features = ["examples"]
 
 [features]
+default = ["usb"]
 examples = ["strum", "dep:eframe", "dep:gilrs"]
 strum = ["dep:strum", "dep:strum_macros"]
+usb = ["dep:rusb"]
 
 [dependencies]
 num-derive = "0.4"
 num-traits = "0.2"
-rusb = "0.9"
 thiserror = "1"
+
+# USB support
+rusb = { version = "0.9", optional = true }
 
 strum = { version = "0.25", optional = true }
 strum_macros = { version = "0.25", optional = true }

@@ -3,6 +3,7 @@
 
 use crate::Result;
 
+#[cfg(feature = "usb")]
 pub mod usb;
 
 /// Abstraction over various socket types (namely USB and Bluetooth) to

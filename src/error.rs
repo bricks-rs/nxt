@@ -9,6 +9,7 @@ pub enum Error {
     #[error("No NXT brick found")]
     NoBrick,
 
+    #[cfg(feature = "usb")]
     #[error("libusb error")]
     Usb(#[from] rusb::Error),
 

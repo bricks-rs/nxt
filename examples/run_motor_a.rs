@@ -1,9 +1,9 @@
-use nxtusb::{motor::*, *};
+use nxt::{motor::*, *};
 
 const POWER: i8 = 80;
 
 #[tokio::main]
-async fn main() -> nxtusb::Result<()> {
+async fn main() -> nxt::Result<()> {
     let nxt = Nxt::first_usb().await?;
 
     println!("Running motor A at {POWER}");

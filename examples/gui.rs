@@ -1,5 +1,5 @@
 use eframe::egui;
-use nxtusb::{motor::*, sensor::*, system::*, *};
+use nxt::{motor::*, sensor::*, system::*, *};
 use std::{sync::mpsc, time::Duration};
 use tokio::runtime::Runtime;
 

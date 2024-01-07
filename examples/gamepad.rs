@@ -1,5 +1,5 @@
 use gilrs::{Button, Event, EventType::AxisChanged, Gilrs};
-use nxtusb::{
+use nxt::{
     motor::{OutMode, OutPort, RegulationMode, RunState, RUN_FOREVER},
     Nxt,
 };

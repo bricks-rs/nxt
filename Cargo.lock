@@ -1941,8 +1941,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "nxtusb"
-version = "0.2.0"
+name = "nxt"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "bluer",

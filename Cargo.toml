@@ -1,10 +1,10 @@
 [package]
-name = "nxtusb"
-version = "0.2.0"
+name = "nxt"
+version = "0.2.1"
 edition = "2021"
 authors = ["David Young <david@thedavidyoung.co.uk>"]
 license = "MPL-2.0"
-repository = "https://github.com/bricks-rs/nxtusb"
+repository = "https://github.com/bricks-rs/nxt"
 readme = "README.md"
 description = "USB driver for communicating with the NXT brick"
 

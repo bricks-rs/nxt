@@ -1,7 +1,7 @@
-use nxtusb::*;
+use nxt::*;
 
 #[tokio::main]
-async fn main() -> nxtusb::Result<()> {
+async fn main() -> nxt::Result<()> {
     let nxt = Nxt::first_usb().await?;
 
     println!("List files");

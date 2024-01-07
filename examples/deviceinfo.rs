@@ -1,7 +1,7 @@
-use nxtusb::Nxt;
+use nxt::Nxt;
 
 #[tokio::main]
-async fn main() -> nxtusb::Result<()> {
+async fn main() -> nxt::Result<()> {
     let nxt = Nxt::all_usb().await?;
 
     println!("Found {} NXT bricks", nxt.len());

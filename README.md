@@ -1,18 +1,18 @@
-# nxtusb
+# nxt
 
-USB driver for communicating with the NXT brick. See [examples](https://github.com/bricks-rs/nxtusb/examples)
+USB & Bluetooth driver for communicating with the NXT brick. See [examples](https://github.com/bricks-rs/nxt/examples)
 for sample code.
 
 ## Example
 ```rust,no_run
-use nxtusb::{motor::*, *};
+use nxt::{motor::*, *};
 
 const POWER: i8 = 80;
 
 #[tokio::main]
-async fn main() -> nxtusb::Result<()> {
+async fn main() -> nxt::Result<()> {
     let nxt = Nxt::first_usb().await?;
-    let _nxt2 = nxtusb::Bluetooth::wait_for_nxt().await?;
+    let _nxt2 = nxt::Bluetooth::wait_for_nxt().await?;
 
     println!("Running motor A at {POWER}");
     nxt.set_output_state(

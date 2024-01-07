@@ -14,6 +14,14 @@ async fn main() -> nxtusb::Result<()> {
 
         let info = nxt.get_device_info().await?;
         println!("Device info:\n{info:?}");
+        println!(
+            "BT address: {}",
+            info.bt_addr
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .reduce(|acc, ele| format!("{acc}:{ele}"))
+                .unwrap_or_default()
+        );
 
         let versions = nxt.get_firmware_version().await?;
         println!("Versions:\n{versions:?}");

@@ -21,6 +21,9 @@ use std::{
     sync::Arc,
 };
 
+#[macro_use]
+extern crate tracing;
+
 #[cfg(feature = "strum")]
 pub use strum::IntoEnumIterator;
 
@@ -107,14 +110,16 @@ impl Nxt {
     }
 
     /// Initialise an NXT struct from the given device
-    pub async fn init(
-        device: impl Socket + Send + Sync + 'static,
+    pub async fn init<D: Socket + Send + Sync + 'static>(
+        device: D,
     ) -> Result<Self> {
+        debug!("Initialise NXT from {} device", std::any::type_name::<D>());
         let mut nxt = Self {
             device: Arc::new(device),
             name: String::new(),
         };
         let info = nxt.get_device_info().await?;
+        debug!("Connected device is named `{}`", info.name);
         nxt.name = info.name;
         Ok(nxt)
     }

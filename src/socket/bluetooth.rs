@@ -1,157 +1,120 @@
-// //! Bluetooth protocol support
+//! Bluetooth protocol support
 
-// use super::Socket;
-// use crate::{Error, Result};
-// use bluer::{
-//     Adapter, AdapterEvent, Address, DeviceEvent, DiscoveryFilter,
-//     DiscoveryTransport,
-// };
-// use futures::{pin_mut, stream::SelectAll, StreamExt};
-// use std::{collections::HashSet, sync::OnceLock};
-// use tokio::sync::{mpsc, oneshot};
+use std::sync::OnceLock;
 
-// type BtMsg = (BtMsgType, oneshot::Sender<BtMsgType>);
+use super::Socket;
+use crate::{Error, Nxt, Result};
+use bluer::{
+    rfcomm::{self, SocketAddr},
+    Adapter, AdapterEvent, Address,
+};
+use futures::StreamExt;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    sync::RwLock,
+};
 
-// enum BtMsgType {
-//     ListDiscovered,
-//     DiscoveredDevices { discovered: Vec<Address> },
-//     Connect { addr: Address },
-//     ConnectStatus { addr: Address },
-//     SendReq { addr: Address, pkt: Vec<u8> },
-//     SendResp { len: usize },
-//     RecvReq,
-//     RecvResp { pkt: Vec<u8> },
-// }
+/// Observed device class advertised by NXT brick
+const NXT_DEVICE_CLASS: u32 = 0x804;
+/// RFCOMM channel used by the NXT brick
+const NXT_BT_CHAN: u8 = 1;
+/// Stores a shared adapter object for performing device scans
+static ADAPTER: OnceLock<Adapter> = OnceLock::new();
 
-// impl BtMsgType {
-//     fn send_resp(self) -> Result<usize> {
-//         let BtMsgType::SendResp(len) = self else {
-//             return Err(Error::Parse("Unexpected message type"));
-//         };
-//         Ok(len)
-//     }
-//     fn recv_resp(self) -> Result<Vec<u8>> {
-//         let BtMsgType::RecvResp { pkt } = self else {
-//             return Err(Error::Parse("Unexpected message type"));
-//         };
-//         Ok(pkt)
-//     }
-// }
-
-// static BT_TX: OnceLock<mpsc::Sender<BtMsg>> = OnceLock::new();
-
-// /// Observed device class advertised by NXT brick
-// const NXT_DEVICE_CLASS: u32 = 0x804;
-
-// fn init_bt() -> mpsc::Sender<BtMsg> {
-//     let (tx, rx) = mpsc::channel(10);
-
-//     // spawn a tokio runtime in a background thread
-//     std::thread::spawn(move || {
-//         let rt = tokio::runtime::Builder::new_current_thread()
-//             .build()
-//             .unwrap();
-//         rt.block_on(bluetooth_background_task(rx));
-//     });
-
-//     tx
-// }
-
-// async fn bluetooth_background_task(rx: mpsc::Receiver<BtMsg>) {
-//     let session = bluer::Session::new().await.unwrap();
-//     let adapter = session.default_adapter().await.unwrap();
-//     adapter.set_powered(true).await.unwrap();
-//     let device_events = adapter.discover_devices().await.unwrap();
-//     pin_mut!(device_events);
-
-//     let mut discovered_devices = HashSet::new();
-//     loop {
-//         tokio::select! {
-//             Some(device_event) = device_events.next() => {
-//                 handle_device_event(
-//                     &adapter,
-//                     &mut discovered_devices,
-//                     device_event,
-//                 ).await;
-//             }
-//         }
-//     }
-// }
-
-// async fn handle_device_event(
-//     adapter: &Adapter,
-//     discovered_devices: &mut HashSet<Address>,
-//     device_event: AdapterEvent,
-// ) {
-//     match device_event {
-//         AdapterEvent::DeviceAdded(addr) => {
-//             println!("Device added: {addr:?}");
-//             // check whether it looks like an NXT
-//             let device = adapter.device(addr).unwrap();
-//             if device.class().await.unwrap_or_default()
-//                 == Some(NXT_DEVICE_CLASS)
-//             {
-//                 discovered_devices.insert(addr);
-//             }
-//         }
-//         AdapterEvent::DeviceRemoved(addr) => {
-//             println!("Device removed: {addr:?}");
-//             discovered_devices.remove(&addr);
-//         }
-//         AdapterEvent::PropertyChanged(_) => {}
-//     }
-// }
-
-pub struct Bluetooth {
-    // tx: mpsc::Sender<BtMsg>,
-    // addr: Option<Address>,
+/// Get a handle to the default Bluetooth adapter, returning the cached
+/// one if present
+async fn init_adapter() -> Result<&'static Adapter> {
+    if let Some(adapter) = ADAPTER.get() {
+        Ok(adapter)
+    } else {
+        let session = bluer::Session::new().await?;
+        let adapter = session.default_adapter().await?;
+        adapter.set_powered(true).await?;
+        Ok(ADAPTER.get_or_init(|| adapter))
+    }
 }
 
-// impl Default for Bluetooth {
-//     fn default() -> Self {
-//         Self::new()
-//     }
-// }
+/// A handle to an NXT brick over Bluetooth
+pub struct Bluetooth {
+    /// Connected RFCOMM stream
+    stream: RwLock<rfcomm::Stream>,
+}
 
-// impl Bluetooth {
-//     pub fn new() -> Self {
-//         let tx = BT_TX.get_or_init(init_bt).clone();
-//         Self { tx, addr: None }
-//     }
+impl From<rfcomm::Stream> for Bluetooth {
+    fn from(stream: rfcomm::Stream) -> Self {
+        Self {
+            stream: RwLock::new(stream),
+        }
+    }
+}
 
-//     pub fn connect(&self, addr: Address) -> Result<()> {
-//         let (tx, rx) = oneshot::channel();
-//         self.tx.blocking_send(())
-//     }
-// }
+impl Bluetooth {
+    /// Connect to an NXT brick at the specified address
+    pub async fn connect(addr: Address) -> Result<Nxt> {
+        let socket = rfcomm::Socket::new()?;
+        let stream = socket
+            .connect(SocketAddr::new(addr, NXT_BT_CHAN))
+            .await?
+            .into();
+        let conn = Self { stream };
+        println!("Connected!");
+        crate::Nxt::init(conn).await
+    }
 
-// impl Socket for Bluetooth {
-//     fn send(&self, data: &[u8]) -> Result<usize> {
-//         let (tx, rx) = oneshot::channel();
-//         let Some(addr) = self.addr else {
-//             return Err(Error::NoBrick);
-//         };
-//         self.tx
-//             .blocking_send((
-//                 BtMsgType::SendReq {
-//                     addr,
-//                     pkt: data.to_vec(),
-//                 },
-//                 tx,
-//             ))
-//             .unwrap();
-//         Ok(rx.blocking_recv().unwrap().send_resp().unwrap())
-//     }
+    /// Listen for bluetooth connections and try to connec to the first
+    /// NXT device discovered
+    pub async fn wait_for_nxt() -> Result<crate::Nxt> {
+        let adapter = init_adapter().await?;
+        let mut device_events = adapter.discover_devices().await?;
 
-//     fn recv<'buf>(&self, buf: &'buf mut [u8]) -> Result<&'buf [u8]> {
-//         let (tx, rx) = oneshot::channel();
-//         self.tx.blocking_send((BtMsgType::RecvReq, tx)).unwrap();
-//         let recv = rx.blocking_recv().unwrap().recv_resp().unwrap();
-//         if recv.len() > buf.len() {
-//             Err(Error::Parse("Message longer than buffer"))
-//         } else {
-//             buf[..recv.len()].copy_from_slice(&recv);
-//             Ok(&buf[..recv.len()])
-//         }
-//     }
-// }
+        while let Some(evt) = device_events.next().await {
+            if let AdapterEvent::DeviceAdded(addr) = evt {
+                println!("Device added: {addr:?}");
+                // check whether it looks like an NXT
+                let device = adapter.device(addr).unwrap();
+                if device.class().await.unwrap_or_default()
+                    == Some(NXT_DEVICE_CLASS)
+                {
+                    // device.connect().await?;
+                    println!("Device looks like an NXT; connecting");
+
+                    return Self::connect(addr).await;
+                }
+            }
+        }
+
+        Err(Error::NoBrick)
+    }
+}
+
+#[async_trait::async_trait]
+impl Socket for Bluetooth {
+    #[tracing::instrument(skip_all)]
+    async fn send(&self, data: &[u8]) -> Result<usize> {
+        debug!("Writing {} bytes", data.len());
+        let len_prefix: u16 = data.len().try_into()?;
+        let mut lock = self.stream.write().await;
+        let written = lock.write(&len_prefix.to_le_bytes()).await?;
+        debug_assert_eq!(written, 2);
+        Ok(lock.write(data).await?)
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn recv<'buf>(&self, buf: &'buf mut [u8]) -> Result<&'buf [u8]> {
+        let mut len_prefix = [0; 2];
+        let mut lock = self.stream.write().await;
+        let len = lock.read_exact(&mut len_prefix).await?;
+        debug_assert_eq!(len, len_prefix.len());
+        debug!("Expecting {len} bytes from prefix");
+
+        let len_prefix = u16::from_le_bytes(len_prefix).into();
+        if buf.len() < len_prefix {
+            return Err(Error::Parse("Data too long for buffer"));
+        }
+        let len = lock.read_exact(&mut buf[..len_prefix]).await?;
+        drop(lock);
+        debug_assert_eq!(len, len_prefix);
+
+        Ok(&buf[..len])
+    }
+}

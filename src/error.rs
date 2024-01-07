@@ -13,6 +13,10 @@ pub enum Error {
     #[error("libusb error")]
     Usb(#[from] rusb::Error),
 
+    #[cfg(feature = "bluetooth")]
+    #[error("bluetooth error")]
+    Bluetooth(#[from] bluer::Error),
+
     #[error("device error")]
     Device(#[from] crate::protocol::DeviceError),
 

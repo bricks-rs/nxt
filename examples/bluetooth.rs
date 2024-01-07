@@ -1,8 +1,11 @@
-use nxtusb::Nxt;
+#[tokio::main]
+async fn main() -> nxtusb::Result<()> {
+    tracing_subscriber::fmt::init();
 
-fn main() -> nxtusb::Result<()> {
-    // let device = nxtusb::Bluetooth::new();
-    // let _nxt = Nxt::init(device);
+    let nxt = nxtusb::Bluetooth::wait_for_nxt().await?;
+
+    let info = nxt.get_device_info().await?;
+    dbg!(info);
 
     Ok(())
 }

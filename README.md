@@ -12,6 +12,7 @@ const POWER: i8 = 80;
 #[tokio::main]
 async fn main() -> nxtusb::Result<()> {
     let nxt = Nxt::first_usb().await?;
+    let _nxt2 = nxtusb::Bluetooth::wait_for_nxt().await?;
 
     println!("Running motor A at {POWER}");
     nxt.set_output_state(

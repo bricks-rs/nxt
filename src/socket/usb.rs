@@ -37,12 +37,13 @@ pub struct Usb {
     device: DeviceHandle<GlobalContext>,
 }
 
+#[async_trait::async_trait]
 impl Socket for Usb {
-    fn send(&self, data: &[u8]) -> Result<usize> {
+    async fn send(&self, data: &[u8]) -> Result<usize> {
         Ok(self.device.write_bulk(WRITE_ENDPOINT, data, USB_TIMEOUT)?)
     }
 
-    fn recv<'buf>(&self, buf: &'buf mut [u8]) -> Result<&'buf [u8]> {
+    async fn recv<'buf>(&self, buf: &'buf mut [u8]) -> Result<&'buf [u8]> {
         let read = self.device.read_bulk(READ_ENDPOINT, buf, USB_TIMEOUT)?;
         Ok(&buf[..read])
     }

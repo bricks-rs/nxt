@@ -2,8 +2,9 @@ use nxtusb::{motor::*, *};
 
 const POWER: i8 = 80;
 
-fn main() -> nxtusb::Result<()> {
-    let nxt = Nxt::first_usb()?;
+#[tokio::main]
+async fn main() -> nxtusb::Result<()> {
+    let nxt = Nxt::first_usb().await?;
 
     println!("Running motor A at {POWER}");
     nxt.set_output_state(
@@ -14,7 +15,8 @@ fn main() -> nxtusb::Result<()> {
         0,
         RunState::Running,
         RUN_FOREVER,
-    )?;
+    )
+    .await?;
 
     std::thread::sleep(std::time::Duration::from_secs(5));
 
@@ -27,9 +29,10 @@ fn main() -> nxtusb::Result<()> {
         0,
         RunState::Running,
         RUN_FOREVER,
-    )?;
+    )
+    .await?;
 
-    let bat = nxt.get_battery_level()?;
+    let bat = nxt.get_battery_level().await?;
     println!("Battery level is {bat} mV");
 
     Ok(())

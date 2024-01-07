@@ -43,21 +43,24 @@ impl Robot {
         self.changed
     }
 
-    pub fn send(&mut self) -> Result {
-        self.nxt.set_output_state(
-            OutPort::BC,
-            self.speed,
-            OutMode::ON,
-            RegulationMode::Idle,
-            self.steering,
-            RunState::Running,
-            RUN_FOREVER,
-        )?;
+    pub async fn send(&mut self) -> Result {
+        self.nxt
+            .set_output_state(
+                OutPort::BC,
+                self.speed,
+                OutMode::ON,
+                RegulationMode::Idle,
+                self.steering,
+                RunState::Running,
+                RUN_FOREVER,
+            )
+            .await?;
         Ok(())
     }
 }
 
-fn main() -> Result {
+#[tokio::main]
+async fn main() -> Result {
     let mut gilrs = Gilrs::new().unwrap();
 
     // Iterate over all connected gamepads
@@ -65,7 +68,7 @@ fn main() -> Result {
         println!("{} is {:?}", gamepad.name(), gamepad.power_info());
     }
 
-    let nxt = Nxt::first_usb()?;
+    let nxt = Nxt::first_usb().await?;
 
     let mut active_gamepad = None;
     let mut robot = Robot::new(nxt);
@@ -101,7 +104,7 @@ fn main() -> Result {
             last_update = Instant::now();
             if robot.changed() {
                 println!("{robot:?}");
-                robot.send()?;
+                robot.send().await?;
             }
         }
 

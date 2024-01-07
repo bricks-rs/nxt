@@ -16,6 +16,7 @@
 pub use error::{Error, Result};
 
 use std::{
+    fmt::{self, Debug, Formatter},
     io::{Cursor, Write},
     sync::Arc,
 };
@@ -29,6 +30,12 @@ mod protocol;
 pub mod sensor;
 mod socket;
 pub mod system;
+
+#[cfg(feature = "usb")]
+pub use socket::usb::Usb;
+
+#[cfg(feature = "bluetooth")]
+pub use socket::bluetooth::Bluetooth;
 
 use motor::{OutMode, OutPort, OutputState, RegulationMode, RunState};
 use protocol::{Opcode, Packet};
@@ -70,37 +77,44 @@ const DISPLAY_NUM_CHUNKS: u16 =
 #[derive(Clone)]
 pub struct Nxt {
     /// Socket device, e.g. USB or Bluetooth
-    device: Arc<dyn Socket>,
+    device: Arc<dyn Socket + Send + Sync>,
     /// Name of the brick
     name: String,
+}
+
+impl Debug for Nxt {
+    fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
+        fmt.debug_struct("NXT")
+            .field("name", &self.name)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Nxt {
     /// Search for plugged-in NXT devices and establish a connection to
     /// the first one
     #[cfg(feature = "usb")]
-    pub fn first_usb() -> Result<Self> {
+    pub async fn first_usb() -> Result<Self> {
         let device = socket::usb::Usb::first()?;
-        Self::init(Arc::new(device))
+        Self::init(device).await
     }
 
     /// Connect to all plugged-in NXT bricks and return them in a `Vec`
     #[cfg(feature = "usb")]
-    pub fn all_usb() -> Result<Vec<Self>> {
+    pub async fn all_usb() -> Result<Vec<Self>> {
         let devices = socket::usb::Usb::all()?;
-        devices
-            .into_iter()
-            .map(|device| Self::init(Arc::new(device)))
-            .collect()
+        futures::future::try_join_all(devices.into_iter().map(Self::init)).await
     }
 
     /// Initialise an NXT struct from the given device
-    pub fn init(device: Arc<dyn Socket>) -> Result<Self> {
+    pub async fn init(
+        device: impl Socket + Send + Sync + 'static,
+    ) -> Result<Self> {
         let mut nxt = Self {
-            device,
+            device: Arc::new(device),
             name: String::new(),
         };
-        let info = nxt.get_device_info()?;
+        let info = nxt.get_device_info().await?;
         nxt.name = info.name;
         Ok(nxt)
     }
@@ -114,14 +128,14 @@ impl Nxt {
     /// Send the provided packet an optionally check the response status.
     /// Use this API if there's no useful data in the reply beyond the
     /// status field
-    fn send(&self, pkt: &Packet, check_status: bool) -> Result<()> {
+    async fn send(&self, pkt: &Packet, check_status: bool) -> Result<()> {
         let mut buf = [0; 64];
         let serialised = pkt.serialise(&mut buf)?;
 
-        let written = self.device.send(serialised)?;
+        let written = self.device.send(serialised).await?;
         if written == serialised.len() {
             if check_status {
-                let _recv = self.recv(pkt.opcode)?;
+                let _recv = self.recv(pkt.opcode).await?;
             }
             Ok(())
         } else {
@@ -131,9 +145,9 @@ impl Nxt {
 
     /// Read an incoming reply packet and verify that its opcode matches
     /// the expected value
-    fn recv(&self, opcode: Opcode) -> Result<Packet> {
+    async fn recv(&self, opcode: Opcode) -> Result<Packet> {
         let mut buf = [0; 64];
-        let buf = self.device.recv(&mut buf)?;
+        let buf = self.device.recv(&mut buf).await?;
 
         let mut recv = Packet::parse(buf)?;
         recv.check_status()?;
@@ -147,23 +161,25 @@ impl Nxt {
     /// Send the provided packet and read the response. Use this API
     /// when the reply is expected to contain useful data, e.g. sensor
     /// values
-    fn send_recv(&self, pkt: &Packet) -> Result<Packet> {
-        self.send(pkt, false)?;
-        self.recv(pkt.opcode)
+    async fn send_recv(&self, pkt: &Packet) -> Result<Packet> {
+        self.send(pkt, false).await?;
+        self.recv(pkt.opcode).await
     }
 
     /// Convenience function to retrieve the contents of the LCD screen.
     /// The data is in a slightly odd format; see
     /// [`system::display_data_to_raster`] for details.
-    pub fn get_display_data(&self) -> Result<[u8; DISPLAY_DATA_LEN]> {
+    pub async fn get_display_data(&self) -> Result<[u8; DISPLAY_DATA_LEN]> {
         let out = [0; DISPLAY_DATA_LEN];
         let mut cur = Cursor::new(out);
         for chunk_idx in 0..DISPLAY_NUM_CHUNKS {
-            let data = self.read_io_map(
-                MOD_DISPLAY,
-                DISPLAY_DATA_OFFSET + chunk_idx * DISPLAY_DATA_CHUNK_SIZE,
-                DISPLAY_DATA_CHUNK_SIZE,
-            )?;
+            let data = self
+                .read_io_map(
+                    MOD_DISPLAY,
+                    DISPLAY_DATA_OFFSET + chunk_idx * DISPLAY_DATA_CHUNK_SIZE,
+                    DISPLAY_DATA_CHUNK_SIZE,
+                )
+                .await?;
             assert_eq!(data.len(), DISPLAY_DATA_CHUNK_SIZE.into());
             cur.write_all(&data)?;
         }
@@ -172,16 +188,16 @@ impl Nxt {
     }
 
     /// Retrieve the current battery level, in mV
-    pub fn get_battery_level(&self) -> Result<u16> {
+    pub async fn get_battery_level(&self) -> Result<u16> {
         let pkt = Packet::new(Opcode::DirectGetBattLevel);
-        let mut recv = self.send_recv(&pkt)?;
+        let mut recv = self.send_recv(&pkt).await?;
         recv.read_u16()
     }
 
     /// Read firmware versions from the NXT brick
-    pub fn get_firmware_version(&self) -> Result<FwVersion> {
+    pub async fn get_firmware_version(&self) -> Result<FwVersion> {
         let pkt = Packet::new(Opcode::SystemVersions);
-        let mut recv = self.send_recv(&pkt)?;
+        let mut recv = self.send_recv(&pkt).await?;
         let prot_min = recv.read_u8()?;
         let prot_maj = recv.read_u8()?;
         let fw_min = recv.read_u8()?;
@@ -194,38 +210,38 @@ impl Nxt {
 
     /// Start running the program with the specified name. Returns an
     /// `ERR_RC_ILLEGAL_VAL` error if the file does not exist.
-    pub fn start_program(&self, name: &str) -> Result<()> {
+    pub async fn start_program(&self, name: &str) -> Result<()> {
         let mut pkt = Packet::new(Opcode::DirectStartProgram);
         pkt.push_filename(name)?;
-        self.send(&pkt, true)
+        self.send(&pkt, true).await
     }
 
     /// Stop the currently executing program. Returns an `ERR_NO_PROG`
     /// error if there is no program running.
-    pub fn stop_program(&self) -> Result<()> {
+    pub async fn stop_program(&self) -> Result<()> {
         let pkt = Packet::new(Opcode::DirectStopProgram);
-        self.send(&pkt, true)
+        self.send(&pkt, true).await
     }
 
     /// Play the specified sound file. Returns an `ERR_RC_ILLEGAL_VAL`
     /// if the file does not exist
-    pub fn play_sound(&self, file: &str, loop_: bool) -> Result<()> {
+    pub async fn play_sound(&self, file: &str, loop_: bool) -> Result<()> {
         let mut pkt = Packet::new(Opcode::DirectPlaySoundFile);
         pkt.push_bool(loop_);
         pkt.push_filename(file)?;
-        self.send(&pkt, true)
+        self.send(&pkt, true).await
     }
 
     /// Play the specified tone for the given duration.
-    pub fn play_tone(&self, freq: u16, duration_ms: u16) -> Result<()> {
+    pub async fn play_tone(&self, freq: u16, duration_ms: u16) -> Result<()> {
         let mut pkt = Packet::new(Opcode::DirectPlayTone);
         pkt.push_u16(freq);
         pkt.push_u16(duration_ms);
-        self.send(&pkt, true)
+        self.send(&pkt, true).await
     }
 
     /// Set the output state for the given individual or compound port
-    pub fn set_output_state(
+    pub async fn set_output_state(
         &self,
         port: OutPort,
         power: i8,
@@ -243,11 +259,11 @@ impl Nxt {
         pkt.push_i8(turn_ratio);
         pkt.push_u8(run_state as u8);
         pkt.push_u32(tacho_limit);
-        self.send(&pkt, true)
+        self.send(&pkt, true).await
     }
 
     /// Set the given input to the specified mode
-    pub fn set_input_mode(
+    pub async fn set_input_mode(
         &self,
         port: InPort,
         sensor_type: SensorType,
@@ -257,17 +273,17 @@ impl Nxt {
         pkt.push_u8(port as u8);
         pkt.push_u8(sensor_type as u8);
         pkt.push_u8(sensor_mode as u8);
-        self.send(&pkt, true)
+        self.send(&pkt, true).await
     }
 
     /// Retrieve the state of the specified output. Returns an
     /// `ERR_RC_ILLEGAL_VAL` if the port is not a valid single port
     /// specification
-    pub fn get_output_state(&self, port: OutPort) -> Result<OutputState> {
+    pub async fn get_output_state(&self, port: OutPort) -> Result<OutputState> {
         let mut pkt = Packet::new(Opcode::DirectGetOutState);
         pkt.push_u8(port as u8);
-        self.send(&pkt, false)?;
-        let mut recv = self.recv(Opcode::DirectGetOutState)?;
+        self.send(&pkt, false).await?;
+        let mut recv = self.recv(Opcode::DirectGetOutState).await?;
         let port = recv.read_u8()?.try_into()?;
         let power = recv.read_i8()?;
         let mode = recv.read_u8()?.into();
@@ -294,10 +310,10 @@ impl Nxt {
     }
 
     /// Retrieve the state of the specified input port
-    pub fn get_input_values(&self, port: InPort) -> Result<InputValues> {
+    pub async fn get_input_values(&self, port: InPort) -> Result<InputValues> {
         let mut pkt = Packet::new(Opcode::DirectGetInVals);
         pkt.push_u8(port as u8);
-        let mut recv = self.send_recv(&pkt)?;
+        let mut recv = self.send_recv(&pkt).await?;
         // hdr>>  s  p  v  c  ty mo  raw>>  norm>  sc>>  cal>>
         // [2, 7, 0, 0, 1, 0, 1, 20, ff, 3, ff, 3, 0, 0, ff, 3]
         let port = recv.read_u8()?.try_into()?;
@@ -325,16 +341,16 @@ impl Nxt {
 
     /// Reset the scaled value of the spcified input port, e.g. clears
     /// the edge or pulse counter.
-    pub fn reset_input_scaled_value(&self, port: InPort) -> Result<()> {
+    pub async fn reset_input_scaled_value(&self, port: InPort) -> Result<()> {
         let mut pkt = Packet::new(Opcode::DirectResetInVal);
         pkt.push_u8(port as u8);
-        self.send(&pkt, true)
+        self.send(&pkt, true).await
     }
 
     /// Write a message to the specified inbox. Returns an error if the
     /// inbox ID is greater than [`MAX_INBOX_ID`] or of the message is
     /// longer than [`MAX_MESSAGE_LEN`] bytes
-    pub fn message_write(&self, inbox: u8, message: &[u8]) -> Result<()> {
+    pub async fn message_write(&self, inbox: u8, message: &[u8]) -> Result<()> {
         if inbox > MAX_INBOX_ID {
             return Err(Error::Serialise("Invalid mailbox ID"));
         }
@@ -349,7 +365,7 @@ impl Nxt {
         pkt.push_u8(message.len() as u8 + 1);
         pkt.push_slice(message);
         pkt.push_u8(0);
-        self.send(&pkt, true)
+        self.send(&pkt, true).await
     }
 
     /// Reset the motor position counter. Returns an `ERR_RC_ILLEGAL_VAL`
@@ -358,7 +374,7 @@ impl Nxt {
     /// * `relative`:
     ///   * `TRUE`: reset position relative to last motor control block
     ///   * `FALSE`: reset position relative to start of last program
-    pub fn reset_motor_position(
+    pub async fn reset_motor_position(
         &self,
         port: OutPort,
         relative: bool,
@@ -366,35 +382,35 @@ impl Nxt {
         let mut pkt = Packet::new(Opcode::DirectResetPosition);
         pkt.push_u8(port as u8);
         pkt.push_bool(relative);
-        self.send(&pkt, true)
+        self.send(&pkt, true).await
     }
 
     /// Stop playing the current sound file, if any
-    pub fn stop_sound_playback(&self) -> Result<()> {
+    pub async fn stop_sound_playback(&self) -> Result<()> {
         let pkt = Packet::new(Opcode::DirectStopSound);
-        self.send(&pkt, true)
+        self.send(&pkt, true).await
     }
 
     /// Reset the sleep timer and return the sleep timeout
-    pub fn keep_alive(&self) -> Result<u32> {
+    pub async fn keep_alive(&self) -> Result<u32> {
         let pkt = Packet::new(Opcode::DirectKeepAlive);
-        self.send(&pkt, false)?;
-        let mut recv = self.recv(Opcode::DirectKeepAlive)?;
+        self.send(&pkt, false).await?;
+        let mut recv = self.recv(Opcode::DirectKeepAlive).await?;
         recv.read_u32()
     }
 
     /// Retrieve the status of the specified low speed port
-    pub fn ls_get_status(&self, port: InPort) -> Result<u8> {
+    pub async fn ls_get_status(&self, port: InPort) -> Result<u8> {
         let mut pkt = Packet::new(Opcode::DirectLsGetStatus);
         pkt.push_u8(port as u8);
-        self.send(&pkt, false)?;
-        let mut recv = self.recv(Opcode::DirectLsGetStatus)?;
+        self.send(&pkt, false).await?;
+        let mut recv = self.recv(Opcode::DirectLsGetStatus).await?;
         recv.read_u8()
     }
 
     /// Write the provided data to the low speed bus on the given port
     /// and read the  specified number of bytes in response
-    pub fn ls_write(
+    pub async fn ls_write(
         &self,
         port: InPort,
         tx_data: &[u8],
@@ -413,15 +429,15 @@ impl Nxt {
         pkt.push_u8(tx_data.len() as u8);
         pkt.push_u8(rx_bytes);
         pkt.push_slice(tx_data);
-        self.send(&pkt, true)
+        self.send(&pkt, true).await
     }
 
     /// Read data from the low speed port
-    pub fn ls_read(&self, port: InPort) -> Result<Vec<u8>> {
+    pub async fn ls_read(&self, port: InPort) -> Result<Vec<u8>> {
         let mut pkt = Packet::new(Opcode::DirectLsRead);
         pkt.push_u8(port as u8);
-        self.send(&pkt, false)?;
-        let mut recv = self.recv(Opcode::DirectLsRead)?;
+        self.send(&pkt, false).await?;
+        let mut recv = self.recv(Opcode::DirectLsRead).await?;
         let len = recv.read_u8()?;
         let data = recv.read_slice(len as usize)?;
         Ok(data.to_vec())
@@ -429,15 +445,15 @@ impl Nxt {
 
     /// Get the name of the currently running program. Returns
     /// `ERR_NO_PROG` if there is no program currently running
-    pub fn get_current_program_name(&self) -> Result<String> {
+    pub async fn get_current_program_name(&self) -> Result<String> {
         let pkt = Packet::new(Opcode::DirectGetCurrProgram);
-        self.send(&pkt, false)?;
-        let mut recv = self.recv(Opcode::DirectGetCurrProgram)?;
+        self.send(&pkt, false).await?;
+        let mut recv = self.recv(Opcode::DirectGetCurrProgram).await?;
         recv.read_filename()
     }
 
     /// Read a message from the specified mailbox
-    pub fn message_read(
+    pub async fn message_read(
         &self,
         remote_inbox: u8,
         local_inbox: u8,
@@ -447,8 +463,8 @@ impl Nxt {
         pkt.push_u8(remote_inbox);
         pkt.push_u8(local_inbox);
         pkt.push_bool(remove);
-        self.send(&pkt, false)?;
-        let mut recv = self.recv(Opcode::DirectMessageRead)?;
+        self.send(&pkt, false).await?;
+        let mut recv = self.recv(Opcode::DirectMessageRead).await?;
         let _local_inbox = recv.read_u8()?;
         let len = recv.read_u8()?;
         let data = recv.read_slice(len as usize)?;
@@ -456,27 +472,35 @@ impl Nxt {
     }
 
     /// Open the specified file for writing and return its handle
-    pub fn file_open_write(&self, name: &str, len: u32) -> Result<FileHandle> {
+    pub async fn file_open_write(
+        &self,
+        name: &str,
+        len: u32,
+    ) -> Result<FileHandle> {
         let mut pkt = Packet::new(Opcode::SystemOpenwrite);
         pkt.push_filename(name)?;
         pkt.push_u32(len);
-        let mut recv = self.send_recv(&pkt)?;
+        let mut recv = self.send_recv(&pkt).await?;
         let handle = recv.read_u8()?;
         Ok(FileHandle { handle, len })
     }
 
     /// Write the provided data to the previously opened file
-    pub fn file_write(&self, handle: &FileHandle, data: &[u8]) -> Result<u32> {
+    pub async fn file_write(
+        &self,
+        handle: &FileHandle,
+        data: &[u8],
+    ) -> Result<u32> {
         let mut pkt = Packet::new(Opcode::SystemWrite);
         pkt.push_u8(handle.handle);
         pkt.push_slice(data);
-        let mut recv = self.send_recv(&pkt)?;
+        let mut recv = self.send_recv(&pkt).await?;
         let _handle = recv.read_u8()?;
         recv.read_u32()
     }
 
     /// Open the specified file in `write data` mode and return its handle
-    pub fn file_open_write_data(
+    pub async fn file_open_write_data(
         &self,
         name: &str,
         len: u32,
@@ -484,44 +508,51 @@ impl Nxt {
         let mut pkt = Packet::new(Opcode::SystemOpenwritedata);
         pkt.push_filename(name)?;
         pkt.push_u32(len);
-        let mut recv = self.send_recv(&pkt)?;
+        let mut recv = self.send_recv(&pkt).await?;
         let handle = recv.read_u8()?;
         Ok(FileHandle { handle, len })
     }
 
     /// Open the specified file in `append` mode and return its handle
-    pub fn file_open_append_data(&self, name: &str) -> Result<FileHandle> {
+    pub async fn file_open_append_data(
+        &self,
+        name: &str,
+    ) -> Result<FileHandle> {
         let mut pkt = Packet::new(Opcode::SystemOpenappenddata);
         pkt.push_filename(name)?;
-        let mut recv = self.send_recv(&pkt)?;
+        let mut recv = self.send_recv(&pkt).await?;
         let handle = recv.read_u8()?;
         let len = recv.read_u32()?;
         Ok(FileHandle { handle, len })
     }
 
     /// Close the specified file handle
-    pub fn file_close(&self, handle: &FileHandle) -> Result<()> {
+    pub async fn file_close(&self, handle: &FileHandle) -> Result<()> {
         let mut pkt = Packet::new(Opcode::SystemClose);
         pkt.push_u8(handle.handle);
-        self.send(&pkt, true)
+        self.send(&pkt, true).await
     }
 
     /// Open the specified file for reading and return its handle
-    pub fn file_open_read(&self, name: &str) -> Result<FileHandle> {
+    pub async fn file_open_read(&self, name: &str) -> Result<FileHandle> {
         let mut pkt = Packet::new(Opcode::SystemOpenread);
         pkt.push_filename(name)?;
-        let mut recv = self.send_recv(&pkt)?;
+        let mut recv = self.send_recv(&pkt).await?;
         let handle = recv.read_u8()?;
         let len = recv.read_u32()?;
         Ok(FileHandle { handle, len })
     }
 
     /// Read data from the previously opened file
-    pub fn file_read(&self, handle: &FileHandle, len: u32) -> Result<Vec<u8>> {
+    pub async fn file_read(
+        &self,
+        handle: &FileHandle,
+        len: u32,
+    ) -> Result<Vec<u8>> {
         let mut pkt = Packet::new(Opcode::SystemOpenread);
         pkt.push_u8(handle.handle);
         pkt.push_u32(len);
-        let mut recv = self.send_recv(&pkt)?;
+        let mut recv = self.send_recv(&pkt).await?;
         let _handle = recv.read_u8()?;
         let len = recv.read_u8()?;
         let data = recv.read_slice(len as usize)?;
@@ -529,18 +560,21 @@ impl Nxt {
     }
 
     /// Delete the named file
-    pub fn file_delete(&self, name: &str) -> Result<()> {
+    pub async fn file_delete(&self, name: &str) -> Result<()> {
         let mut pkt = Packet::new(Opcode::SystemDelete);
         pkt.push_filename(name)?;
-        self.send(&pkt, true)
+        self.send(&pkt, true).await
     }
 
     /// Search for a file matching the specified pattern and return a
     /// handle to the search state
-    pub fn file_find_first(&self, pattern: &str) -> Result<FindFileHandle> {
+    pub async fn file_find_first(
+        &self,
+        pattern: &str,
+    ) -> Result<FindFileHandle> {
         let mut pkt = Packet::new(Opcode::SystemFindfirst);
         pkt.push_filename(pattern)?;
-        let mut recv = self.send_recv(&pkt)?;
+        let mut recv = self.send_recv(&pkt).await?;
         let handle = recv.read_u8()?;
         let name = recv.read_filename()?;
         let len = recv.read_u32()?;
@@ -549,13 +583,13 @@ impl Nxt {
 
     /// Take a search handle and return the next match, or an error if
     /// there are no further matches
-    pub fn file_find_next(
+    pub async fn file_find_next(
         &self,
         handle: &FindFileHandle,
     ) -> Result<FindFileHandle> {
         let mut pkt = Packet::new(Opcode::SystemFindnext);
         pkt.push_u8(handle.handle);
-        let mut recv = self.send_recv(&pkt)?;
+        let mut recv = self.send_recv(&pkt).await?;
         let handle = recv.read_u8()?;
         let name = recv.read_filename()?;
         let len = recv.read_u32()?;
@@ -563,7 +597,7 @@ impl Nxt {
     }
 
     /// Souce code just says `For internal use only`
-    pub fn file_open_read_linear(
+    pub async fn file_open_read_linear(
         &self,
         name: &str,
         len: u32,
@@ -571,13 +605,13 @@ impl Nxt {
         let mut pkt = Packet::new(Opcode::SystemOpenreadlinear);
         pkt.push_filename(name)?;
         pkt.push_u32(len);
-        let mut recv = self.send_recv(&pkt)?;
+        let mut recv = self.send_recv(&pkt).await?;
         let handle = recv.read_u8()?;
         Ok(FileHandle { handle, len })
     }
 
     /// Souce code just says `For internal use only`
-    pub fn file_open_write_linear(
+    pub async fn file_open_write_linear(
         &self,
         name: &str,
         len: u32,
@@ -585,17 +619,20 @@ impl Nxt {
         let mut pkt = Packet::new(Opcode::SystemOpenwritelinear);
         pkt.push_filename(name)?;
         pkt.push_u32(len);
-        let mut recv = self.send_recv(&pkt)?;
+        let mut recv = self.send_recv(&pkt).await?;
         let handle = recv.read_u8()?;
         Ok(FileHandle { handle, len })
     }
 
     /// Search for a module matching the specified pattern and return a
     /// handle to the search state
-    pub fn module_find_first(&self, pattern: &str) -> Result<ModuleHandle> {
+    pub async fn module_find_first(
+        &self,
+        pattern: &str,
+    ) -> Result<ModuleHandle> {
         let mut pkt = Packet::new(Opcode::SystemFindfirstmodule);
         pkt.push_filename(pattern)?;
-        let mut recv = self.send_recv(&pkt)?;
+        let mut recv = self.send_recv(&pkt).await?;
         let handle = recv.read_u8()?;
         let name = recv.read_filename()?;
         let id = recv.read_u32()?;
@@ -612,13 +649,13 @@ impl Nxt {
 
     /// Take a search handle and return the next match, or an error if
     /// there are no further matches
-    pub fn module_find_next(
+    pub async fn module_find_next(
         &self,
         handle: &ModuleHandle,
     ) -> Result<ModuleHandle> {
         let mut pkt = Packet::new(Opcode::SystemFindnextmodule);
         pkt.push_u8(handle.handle);
-        let mut recv = self.send_recv(&pkt)?;
+        let mut recv = self.send_recv(&pkt).await?;
         let handle = recv.read_u8()?;
         let name = recv.read_filename()?;
         let id = recv.read_u32()?;
@@ -634,15 +671,15 @@ impl Nxt {
     }
 
     /// Close the provided module handle
-    pub fn module_close(&self, handle: &ModuleHandle) -> Result<()> {
+    pub async fn module_close(&self, handle: &ModuleHandle) -> Result<()> {
         let mut pkt = Packet::new(Opcode::SystemClosemodhandle);
         pkt.push_u8(handle.handle);
-        self.send(&pkt, true)
+        self.send(&pkt, true).await
     }
 
     /// Read `count` bytes from the IO map belonging to the specified
     /// module at the given offset
-    pub fn read_io_map(
+    pub async fn read_io_map(
         &self,
         mod_id: u32,
         offset: u16,
@@ -652,7 +689,7 @@ impl Nxt {
         pkt.push_u32(mod_id);
         pkt.push_u16(offset);
         pkt.push_u16(count);
-        let mut recv = self.send_recv(&pkt)?;
+        let mut recv = self.send_recv(&pkt).await?;
         let _mod_id = recv.read_u32()?;
         let len = recv.read_u16()?;
         let data = recv.read_slice(len as usize)?;
@@ -661,7 +698,7 @@ impl Nxt {
 
     /// Write the provided data into the IO map belongint to the
     /// specified module at the given offset
-    pub fn write_io_map(
+    pub async fn write_io_map(
         &self,
         mod_id: u32,
         offset: u16,
@@ -672,7 +709,7 @@ impl Nxt {
         pkt.push_u16(offset);
         pkt.push_u16(data.len().try_into()?);
         pkt.push_slice(data);
-        let mut recv = self.send_recv(&pkt)?;
+        let mut recv = self.send_recv(&pkt).await?;
         let _mod_id = recv.read_u32()?;
         recv.read_u16()
     }
@@ -680,7 +717,7 @@ impl Nxt {
     /// Enter firmware update mode - warning, this is not recoverable
     /// without loading new firmware (not currently supported by this
     /// crate)
-    pub fn boot(&self, sure: bool) -> Result<Vec<u8>> {
+    pub async fn boot(&self, sure: bool) -> Result<Vec<u8>> {
         if !sure {
             return Err(Error::Serialise(
                 "Are you sure? This is not recoverable",
@@ -689,21 +726,21 @@ impl Nxt {
 
         let mut pkt = Packet::new(Opcode::SystemBootcmd);
         pkt.push_slice(b"Let's dance: SAMBA\0");
-        let mut recv = self.send_recv(&pkt)?;
+        let mut recv = self.send_recv(&pkt).await?;
         Ok(recv.read_slice(4)?.to_vec())
     }
 
     /// Set the NXT brick's name to the provided value
-    pub fn set_brick_name(&self, name: &str) -> Result<()> {
+    pub async fn set_brick_name(&self, name: &str) -> Result<()> {
         let mut pkt = Packet::new(Opcode::SystemSetbrickname);
         pkt.push_str(name, MAX_NAME_LEN)?;
-        self.send(&pkt, true)
+        self.send(&pkt, true).await
     }
 
     /// Retrieve the Bluetooth address of the brick
-    pub fn get_bt_addr(&self) -> Result<[u8; 6]> {
+    pub async fn get_bt_addr(&self) -> Result<[u8; 6]> {
         let pkt = Packet::new(Opcode::SystemBtgetaddr);
-        let mut recv = self.send_recv(&pkt)?;
+        let mut recv = self.send_recv(&pkt).await?;
         let addr = recv.read_slice(6)?;
         Ok(addr.try_into().unwrap())
     }
@@ -713,9 +750,9 @@ impl Nxt {
     /// * Bluetooth address
     /// * Signal strength of connected bricks
     /// * Available flash memory
-    pub fn get_device_info(&self) -> Result<DeviceInfo> {
+    pub async fn get_device_info(&self) -> Result<DeviceInfo> {
         let pkt = Packet::new(Opcode::SystemDeviceinfo);
-        let mut recv = self.send_recv(&pkt)?;
+        let mut recv = self.send_recv(&pkt).await?;
         let name = recv.read_string(MAX_NAME_LEN)?;
         let bt_addr = [
             recv.read_u8()?,
@@ -744,26 +781,26 @@ impl Nxt {
     }
 
     /// Delete user flash storage
-    pub fn delete_user_flash(&self) -> Result<()> {
+    pub async fn delete_user_flash(&self) -> Result<()> {
         let pkt = Packet::new(Opcode::SystemDeleteuserflash);
-        self.send(&pkt, true)
+        self.send(&pkt, true).await
     }
 
     /// Poll the USB buffer for a command?
-    pub fn poll_command_length(&self, buf: BufType) -> Result<u8> {
+    pub async fn poll_command_length(&self, buf: BufType) -> Result<u8> {
         let mut pkt = Packet::new(Opcode::SystemPollcmdlen);
         pkt.push_u8(buf as u8);
-        let mut recv = self.send_recv(&pkt)?;
+        let mut recv = self.send_recv(&pkt).await?;
         let _buf_num = recv.read_u8()?;
         recv.read_u8()
     }
 
     /// Poll the USB buffer for a command?
-    pub fn poll_command(&self, buf: BufType, len: u8) -> Result<Vec<u8>> {
+    pub async fn poll_command(&self, buf: BufType, len: u8) -> Result<Vec<u8>> {
         let mut pkt = Packet::new(Opcode::SystemPollcmd);
         pkt.push_u8(buf as u8);
         pkt.push_u8(len);
-        let mut recv = self.send_recv(&pkt)?;
+        let mut recv = self.send_recv(&pkt).await?;
         let _buf = recv.read_u8()?;
         let len = recv.read_u8()?;
         let data = recv.read_slice(len as usize)?;
@@ -771,8 +808,8 @@ impl Nxt {
     }
 
     /// Factory reset the bluetooth module
-    pub fn bluetooth_factory_reset(&self) -> Result<()> {
+    pub async fn bluetooth_factory_reset(&self) -> Result<()> {
         let pkt = Packet::new(Opcode::SystemBtfactoryreset);
-        self.send(&pkt, true)
+        self.send(&pkt, true).await
     }
 }

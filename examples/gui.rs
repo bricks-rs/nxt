@@ -1,6 +1,7 @@
 use eframe::egui;
 use nxtusb::{motor::*, sensor::*, system::*, *};
 use std::{sync::mpsc, time::Duration};
+use tokio::runtime::Runtime;
 
 const POLL_DELAY: Duration = Duration::from_millis(300);
 const DISPLAY_PX_SCALE: usize = 4;
@@ -18,6 +19,7 @@ struct App {
     sensors: Vec<InputValues>,
     sensor_poll_handle: SensorPollHandle,
     display: Option<DisplayRaster>,
+    rt: Runtime,
 }
 
 struct Motor {
@@ -51,6 +53,7 @@ impl App {
             sensors: Vec::new(),
             sensor_poll_handle: SensorPollHandle::new(cc.egui_ctx.clone()),
             display: None,
+            rt: Runtime::new().unwrap(),
         }
     }
 }
@@ -91,7 +94,8 @@ impl eframe::App for App {
                 if ui.button("Refresh").clicked() {
                     self.nxt_selected = None;
                     self.nxt_available.clear();
-                    match Nxt::all() {
+                    let all = self.rt.block_on(Nxt::all_usb());
+                    match all {
                         Ok(avail) => self.nxt_available = avail,
                         Err(e) => println!("Error: {e}"),
                     }
@@ -113,9 +117,9 @@ impl eframe::App for App {
                 .and_then(|idx| self.nxt_available.get(idx))
             {
                 ui.separator();
-                motor_ui(ui, nxt, &mut self.motors);
+                motor_ui(ui, &self.rt, nxt, &mut self.motors);
                 ui.separator();
-                sensor_ui(ui, nxt, &mut self.sensors);
+                sensor_ui(ui, &self.rt, nxt, &mut self.sensors);
                 if let Some(display) = &self.display {
                     ui.separator();
                     display_ui(ui, display);
@@ -125,7 +129,12 @@ impl eframe::App for App {
     }
 }
 
-fn motor_ui(ui: &mut egui::Ui, nxt: &Nxt, motors: &mut Vec<Motor>) {
+fn motor_ui(
+    ui: &mut egui::Ui,
+    rt: &Runtime,
+    nxt: &Nxt,
+    motors: &mut Vec<Motor>,
+) {
     for mot in motors {
         ui.horizontal(|ui| {
             let old = mot.power;
@@ -142,7 +151,7 @@ fn motor_ui(ui: &mut egui::Ui, nxt: &Nxt, motors: &mut Vec<Motor>) {
 
             if mot.power != old {
                 // it has changed
-                nxt.set_output_state(
+                rt.block_on(nxt.set_output_state(
                     mot.port,
                     mot.power,
                     OutMode::ON | OutMode::REGULATED,
@@ -150,14 +159,19 @@ fn motor_ui(ui: &mut egui::Ui, nxt: &Nxt, motors: &mut Vec<Motor>) {
                     0,
                     RunState::Running,
                     RUN_FOREVER,
-                )
+                ))
                 .unwrap();
             }
         });
     }
 }
 
-fn sensor_ui(ui: &mut egui::Ui, nxt: &Nxt, sensors: &mut Vec<InputValues>) {
+fn sensor_ui(
+    ui: &mut egui::Ui,
+    rt: &Runtime,
+    nxt: &Nxt,
+    sensors: &mut Vec<InputValues>,
+) {
     for sens in sensors {
         ui.horizontal(|ui| {
             let old_typ = sens.sensor_type;
@@ -194,11 +208,11 @@ fn sensor_ui(ui: &mut egui::Ui, nxt: &Nxt, sensors: &mut Vec<InputValues>) {
             ui.label(format!("Value: {sens}"));
 
             if sens.sensor_type != old_typ || sens.sensor_mode != old_mode {
-                nxt.set_input_mode(
+                rt.block_on(nxt.set_input_mode(
                     sens.port,
                     sens.sensor_type,
                     sens.sensor_mode,
-                )
+                ))
                 .unwrap();
             }
         });
@@ -262,6 +276,9 @@ impl SensorPollHandle {
         let mut nxt = None;
         let mut old_values = Vec::new();
         let mut old_screen = [0u8; DISPLAY_DATA_LEN];
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
         loop {
             if let Ok(new) = nxt_rx.try_recv() {
                 nxt = new;
@@ -271,7 +288,8 @@ impl SensorPollHandle {
             if let Some(nxt) = &nxt {
                 let mut values = Vec::with_capacity(4);
                 for port in InPort::iter() {
-                    values.push(nxt.get_input_values(port).unwrap());
+                    values
+                        .push(rt.block_on(nxt.get_input_values(port)).unwrap());
                 }
                 if values != old_values {
                     old_values = values.clone();
@@ -279,7 +297,7 @@ impl SensorPollHandle {
                     ctx.request_repaint();
                 }
 
-                let screen = nxt.get_display_data().unwrap();
+                let screen = rt.block_on(nxt.get_display_data()).unwrap();
                 if screen != old_screen {
                     val_tx
                         .send(Message::Display(Box::new(

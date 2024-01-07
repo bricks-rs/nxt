@@ -1,11 +1,12 @@
 use nxtusb::{system::*, *};
 
-fn main() -> nxtusb::Result<()> {
-    let nxt = Nxt::first_usb()?;
+#[tokio::main]
+async fn main() -> nxtusb::Result<()> {
+    let nxt = Nxt::first_usb().await?;
 
     println!("Read display");
 
-    let screen = nxt.get_display_data()?;
+    let screen = nxt.get_display_data().await?;
 
     dbg!(screen);
 

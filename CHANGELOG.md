@@ -8,22 +8,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Examples: gamepad
 
 ### Fixed
 
 ### Changed
-- Refactored API to be fully async
 
 ### Removed
+
+## [0.2.0] - 2024-01-07
+
+### Added
+- Added bluetooth support
+- Examples: gamepad, bluetooth
+
+### Changed
+- Refactored API to be fully async
 
 ## [0.1.0] - 2024-01-01
 
 ### Added
-
 - Implementation of control protocol over USB
 - Examples: deviceinfo, display, gui, ls, poll_touch_sensors, run_motor
 
-[unreleased]: https://github.com/bricks-rs/nxtusb/compare/v0.1.0...HEAD
-<!-- [0.1.0]: https://github.com/bricks-rs/nxtusb/compare/v0.1.0...v0.2.0 -->
+[unreleased]: https://github.com/bricks-rs/nxtusb/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/bricks-rs/nxtusb/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/bricks-rs/nxtusb/releases/tag/v0.1.0

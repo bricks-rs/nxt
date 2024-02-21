@@ -1,0 +1,13 @@
+[package]
+name = "nxc"
+version = "0.0.0"
+edition = "2021"
+authors = ["David Young <david@thedavidyoung.co.uk>"]
+license = "MPL-2.0"
+repository = "https://github.com/bricks-rs/nxt"
+# readme = "README.md"
+description = "[wip] Compiler for the NXC language for Lego NXT"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]

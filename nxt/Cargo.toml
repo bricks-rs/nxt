@@ -1,0 +1,63 @@
+[package]
+name = "nxt"
+version = "0.2.1"
+edition = "2021"
+authors = ["David Young <david@thedavidyoung.co.uk>"]
+license = "MPL-2.0"
+repository = "https://github.com/bricks-rs/nxt"
+readme = "README.md"
+description = "USB driver for communicating with the NXT brick"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+
+[[example]]
+name = "bluetooth"
+required-features = ["examples"]
+
+[[example]]
+name = "gamepad"
+required-features = ["examples"]
+
+[[example]]
+name = "gui"
+required-features = ["examples"]
+
+[features]
+default = ["usb", "bluetooth"]
+examples = ["strum", "dep:eframe", "dep:gilrs", "dep:tracing-subscriber"]
+strum = ["dep:strum", "dep:strum_macros"]
+usb = ["dep:rusb"]
+bluetooth = ["dep:bluer", "tokio/rt"]
+
+[dependencies]
+async-trait = "0.1"
+futures = "0.3"
+num-derive = "0.4"
+num-traits = "0.2"
+thiserror = "1"
+tokio = { version = "1", features = ["sync"] }
+tracing = "0.1"
+
+# USB support
+rusb = { version = "0.9", optional = true }
+
+# Bluetooth support
+bluer = { version = "0.16", features = [
+	"bluetoothd",
+	"rfcomm",
+], optional = true }
+
+strum = { version = "0.25", optional = true }
+strum_macros = { version = "0.25", optional = true }
+tracing-subscriber = { version = "0.3", optional = true }
+
+# required for gui
+eframe = { version = "0.24", optional = true }
+
+# required for gamepad
+gilrs = { version = "0.10", optional = true }
+
+[dev-dependencies]
+# used for all examples
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

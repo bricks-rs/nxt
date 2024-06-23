@@ -110,7 +110,7 @@ pub enum DeviceError {
     #[error("no more files")]
     NoMoreFiles = 0x83,
     #[error("end of file expected")]
-    EofExpected0x84,
+    EofExpected = 0x84,
     #[error("end of file")]
     Eof = 0x85,
     #[error("not a linear file")]

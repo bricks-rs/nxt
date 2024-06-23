@@ -292,7 +292,7 @@ impl SensorPollHandle {
                         .push(rt.block_on(nxt.get_input_values(port)).unwrap());
                 }
                 if values != old_values {
-                    old_values = values.clone();
+                    old_values.clone_from(&values);
                     val_tx.send(Message::Sensors(values)).unwrap();
                     ctx.request_repaint();
                 }

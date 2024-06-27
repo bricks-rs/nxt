@@ -73,7 +73,7 @@ impl Usb {
     /// interface on it
     #[allow(clippy::needless_pass_by_value)]
     fn open(device: Device<GlobalContext>) -> Result<Self> {
-        let mut device = device.open()?;
+        let device = device.open()?;
         device.claim_interface(USB_INTERFACE)?;
         Ok(Self { device })
     }
